@@ -2,10 +2,12 @@ import copy
 import glob
 import itertools
 import os
+from pathlib import Path
 import pickle
 import random
 import re
 import shutil
+from warnings import warn
 
 import numpy as np
 import pretty_midi
@@ -168,9 +170,11 @@ class PianoMidiDataset(data.Dataset):
 
     @property
     def cache_dir(self):
-        cache_dir = f'{os.path.expanduser("~")}/Data/dataset_cache/PianoMidi'
-        if not os.path.exists(cache_dir):
-            os.mkdir(cache_dir)
+        # cache_dir = f'{os.path.expanduser("~")}/Data/dataset_cache/PianoMidi'
+        # if not os.path.exists(cache_dir):
+        #     os.mkdir(cache_dir)
+        cache_dir = f'/share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi'
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
         return cache_dir
 
     @property
@@ -508,6 +512,9 @@ class PianoMidiDataset(data.Dataset):
             for midi_file, split in tqdm(self.iterator_gen()):
                 # midi to sequence
                 sequences = self.process_score(midi_file)
+                if not sequences["pitch"]:
+                    warn(f'Skipping file {midi_file}, with empty pitch sequence.')
+                    continue
                 midi_name = os.path.splitext(re.split("/", midi_file)[-1])[0]
                 folder_name = (
                     f"{self.cache_dir}/{self.data_folder_name}/{split}/{midi_name}"

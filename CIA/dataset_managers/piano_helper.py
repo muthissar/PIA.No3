@@ -15,7 +15,8 @@ class PianoIteratorGenerator:
         # self.path = f'{os.path.expanduser("~")}/Data/databases/Piano'
         # trains on transcriptions only:
         self.path = (
-            f'{os.path.expanduser("~")}/Data/databases/Piano/transcriptions/midi'
+            # f'{os.path.expanduser("~")}/Data/databases/Piano/transcriptions/midi'
+            '/share/hel/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/'
         )
         # trains on piano relax
         # self.path = f'{os.path.expanduser("~")}/Data/databases/Piano/transcriptions/relax_piano'

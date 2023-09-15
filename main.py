@@ -1,27 +1,29 @@
 """
 @author: Gaetan Hadjeres
 """
+from CIA.utils import get_free_port
+from CIA.handlers import DecoderPrefixHandler
+from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 import importlib
 import os
 import shutil
-import time
 from datetime import datetime
-
+import time
 import click
 import torch
-import torch.distributed as dist
-import torch.multiprocessing as mp
-from torch.nn.parallel import DistributedDataParallel
 
+import torch.multiprocessing as mp
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel
+from CIA.data_processors.data_processor import DataProcessor
 from CIA.getters import (
-    get_data_processing,
+    get_dataloader_generator,
+    get_data_processor,
+    get_decoder,
     get_handler,
-    get_model,
     get_positional_embedding,
     get_sos_embedding,
 )
-from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
-from CIA.utils import get_free_port
 
 
 @click.command()
@@ -42,7 +44,7 @@ def launcher(train, load, overfitted, config, num_workers):
         world_size = torch.cuda.device_count()
         assert world_size > 0
     else:
-        # only use 1 GPU for inference or CPU
+        # only use 1 GPU for inference
         world_size = 1
 
     # Load config as dict
@@ -79,29 +81,27 @@ def launcher(train, load, overfitted, config, num_workers):
 
 
 def main(rank, train, load, overfitted, config, num_workers, world_size, model_dir):
-    if torch.cuda.is_available():
-        dist.init_process_group(backend="nccl", world_size=world_size, rank=rank)
-        torch.cuda.set_device(rank)
-        device_ids = [rank]
-        output_device = rank
-        device = f"cuda:{rank}"
-    else:
-        # cpu case
-        dist.init_process_group(backend="gloo", world_size=world_size, rank=rank)
-        device_ids = None
-        output_device = None
-        device = "cpu"
+    dist.init_process_group(backend="nccl", world_size=world_size, rank=rank)
+    torch.cuda.set_device(rank)
+    device = f"cuda:{rank}"
 
-    # === Model ====
-    dataloader_generator, data_processor = get_data_processing(
+    # === Decoder ====
+    # dataloader generator
+    dataloader_generator = get_dataloader_generator(
         dataset=config["dataset"],
         dataloader_generator_kwargs=config["dataloader_generator_kwargs"],
+    )
+
+    # data processor
+    data_processor: DataProcessor = get_data_processor(
+        dataloader_generator=dataloader_generator,
+        data_processor_type=config["data_processor_type"],
         data_processor_kwargs=config["data_processor_kwargs"],
     )
+
     # positional embedding
     positional_embedding: PositionalEmbedding = get_positional_embedding(
         dataloader_generator=dataloader_generator,
-        data_processor=data_processor,
         positional_embedding_dict=config["positional_embedding_dict"],
     )
 
@@ -111,148 +111,146 @@ def main(rank, train, load, overfitted, config, num_workers, world_size, model_d
         sos_embedding_dict=config["sos_embedding_dict"],
     )
 
-    model = get_model(
+    decoder = get_decoder(
         data_processor=data_processor,
         dataloader_generator=dataloader_generator,
         positional_embedding=positional_embedding,
         sos_embedding=sos_embedding,
-        model_kwargs=config["model_kwargs"],
+        decoder_kwargs=config["decoder_kwargs"],
+        training_phase=train,
+        handler_type=config["handler_type"],
     )
 
-    model.to(device)
-    model = DistributedDataParallel(
-        module=model, device_ids=device_ids, output_device=output_device
+    decoder.to(device)
+    decoder = DistributedDataParallel(
+        module=decoder,
+        device_ids=[rank],
+        output_device=rank
+        # )
+        ,
+        find_unused_parameters=True,
     )
 
-    model_handler = get_handler(
-        model=model,
+    decoder_handler = get_handler(
+        handler_type=config["handler_type"],
+        decoder=decoder,
         model_dir=model_dir,
         dataloader_generator=dataloader_generator,
     )
 
     if load:
         if overfitted:
-            model_handler.load(early_stopped=False, device=device)
+            decoder_handler.load(early_stopped=False)
         else:
-            model_handler.load(early_stopped=True, device=device)
+            decoder_handler.load(early_stopped=True)
 
     if train:
-        model_handler.train_model(
+        decoder_handler.train_model(
             batch_size=config["batch_size"],
             num_batches=config["num_batches"],
             num_epochs=config["num_epochs"],
             lr=config["lr"],
             plot=True,
             num_workers=num_workers,
-            compute_loss_prefix=config["compute_loss_prefix"],
-            non_conditioned_examples=config["non_conditioned_examples"],
         )
         exit()
 
     # fix projection matrices before generating
-    if hasattr(model_handler.model.module.transformer, "fix_projection_matrices_"):
-        model_handler.model.module.transformer.fix_projection_matrices_()
+    if hasattr(decoder_handler.model.module.transformer, "fix_projection_matrices_"):
+        decoder_handler.model.module.transformer.fix_projection_matrices_()
 
-    # exemple = dict(path='/home/leo/Data/databases/Piano/ecomp_piano_dataset/Abdelmola01.MID', num_events_middle=500,
-    #                start=0)
-    exemple = None
-    num_generations = 1
+    exemple = dict(
+        path="/home/leo/Code/CIA/examples/piano_sofiane.mid",
+        num_events_middle=40,
+        start=0,
+    )
+    # exemple = None
 
     # null_superconditioning
     # null_superconditioning = None
     null_superconditioning = [1, 1.5, 2, 2.5]
 
-    for _ in range(num_generations):
-        if exemple is None:  # use dataloader
-            (_, generator_val, _) = dataloader_generator.dataloaders(
-                batch_size=1, shuffle_val=True
-            )
-            original_x = next(generator_val)["x"]
-            _, metadata_dict = data_processor.preprocess(
-                original_x,
-                num_events_inpainted=100,
-                training=False,
-                non_conditioned_examples=(null_superconditioning is not None),
-            )
-            x = metadata_dict["original_sequence"]
+    if exemple is None:  # use dataloader
+        (_, generator_val, _) = dataloader_generator.dataloaders(
+            batch_size=1, num_workers=num_workers, shuffle_val=True
+        )
+        original_x = next(generator_val)["x"]
+        x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=None)
+    else:
+        # read midi file
+        x = dataloader_generator.dataset.process_score(exemple["path"])
+        # add pad, start and end symbols
+        x = dataloader_generator.dataset.add_start_end_symbols(
+            x,
+            start_time=exemple["start"],
+            sequence_size=dataloader_generator.sequences_size,
+        )
+        # tokenize
+        x = dataloader_generator.dataset.tokenize(x)
+        # to torch tensor
+        original_x = torch.stack(
+            [torch.tensor(x[e]).long() for e in dataloader_generator.features], dim=-1
+        ).unsqueeze(0)
+        # preprocess
+        x, metadata_dict = data_processor.preprocess(
+            original_x, num_events_middle=exemple["num_events_middle"]
+        )
+
+    # reconstruct original sequence to check post-processing
+    # x_postprocess = data_processor.postprocess(
+    #     x, decoding_end=metadata_dict['decoding_end'], metadata_dict=metadata_dict)
+
+    ############################################################
+    # inpainting
+    # start_time = time.time()
+    # x_gen, generated_region, decoding_end, num_event_generated, done = decoder_handler.inpaint(
+    #     x=x.clone(), metadata_dict=metadata_dict, temperature=1., top_p=0.95, top_k=0)
+    # end_time = time.time()
+    ############################################################
+    start_time = time.time()
+    (
+        x_gen,
+        generated_region,
+        decoding_end,
+        num_event_generated,
+        done,
+    ) = decoder_handler.inpaint_non_optimized(
+        x=x.clone(), metadata_dict=metadata_dict, temperature=1.0, top_p=0.95, top_k=0
+    )
+    end_time = time.time()
+    ############################################################
+    x_inpainted = data_processor.postprocess(x_gen, decoding_end, metadata_dict)
+    # Timing infos
+    if type(num_event_generated) == int:
+        num_event_generated = [num_event_generated] * len(x)
+    print(f"Num events_generated: {[e for e in num_event_generated]}")
+    print(f"Time generation: {(end_time - start_time) / len(num_event_generated)}")
+    average_time_list = [(end_time - start_time) / e for e in num_event_generated]
+    print(
+        f"Average time per generated event: {sum(average_time_list) / float(len(average_time_list))}"
+    )
+
+    # Saving
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+    if not os.path.exists(f"{decoder_handler.model_dir}/generations"):
+        os.mkdir(f"{decoder_handler.model_dir}/generations")
+    for k, tensor_score in enumerate(x_inpainted):
+        if null_superconditioning is not None:
+            path_no_extension = f"{decoder_handler.model_dir}/generations/{timestamp}_null{null_superconditioning[k]}"
         else:
-            # read midi file
-            x = dataloader_generator.dataset.process_score(exemple["path"])
-            # add pad, start and end symbols
-            x = dataloader_generator.dataset.add_start_end_symbols(
-                x,
-                start_time=exemple["start"],
-                sequence_size=dataloader_generator.sequences_size,
-            )
-            # tokenize
-            x = dataloader_generator.dataset.tokenize(x)
-            # to torch tensor
-            original_x = torch.stack(
-                [torch.tensor(x[e]).long() for e in dataloader_generator.features],
-                dim=-1,
-            ).unsqueeze(0)
-            # preprocess
-            _, metadata_dict = data_processor.preprocess(
-                original_x,
-                num_events_middle=exemple["num_events_middle"],
-                training=False,
-            )
-            x = metadata_dict["original_sequence"]
-
-        # reconstruct original sequence to check post-processing
-        # x_postprocess = data_processor.postprocess(
-        #     x, decoding_end=metadata_dict["decoding_end"], metadata_dict=metadata_dict
-        # )
-
-        ############################################################
-        # inpainting
-        start_time = time.time()
-        (
-            x_gen,
-            _,
-            decoding_end,
-            num_event_generated,
-            _,
-        ) = model_handler.inpaint_non_optimized_superconditioning(
-            x=x.clone(),
-            metadata_dict=metadata_dict,
-            temperature=1.0,
-            top_p=0.95,
-            top_k=0,
-            regenerate_first_ts=False,
-            null_superconditioning=null_superconditioning,
-        )
-        end_time = time.time()
-        ############################################################
-        x_inpainted = data_processor.postprocess(x_gen, decoding_end)
-
-        # Timing infos
-        if type(num_event_generated) == int:
-            num_event_generated = [num_event_generated] * len(x)
-        print(f"Num events_generated: {[e for e in num_event_generated]}")
-        print(f"Time generation: {(end_time - start_time) / len(num_event_generated)}")
-        average_time_list = [(end_time - start_time) / e for e in num_event_generated]
-        print(
-            f"Average time per generated event: {sum(average_time_list) / float(len(average_time_list))}"
-        )
-
-        # Saving
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
-        if not os.path.exists(f"{model_handler.model_dir}/generations"):
-            os.mkdir(f"{model_handler.model_dir}/generations")
-        for k, tensor_score in enumerate(x_inpainted):
-            if null_superconditioning is not None:
-                path_no_extension = f"{model_handler.model_dir}/generations/{timestamp}_null{null_superconditioning[k]}"
-            else:
-                path_no_extension = (
-                    f"{model_handler.model_dir}/generations/{timestamp}_{k}"
-                )
-            model_handler.dataloader_generator.write(tensor_score, path_no_extension)
-        for k, tensor_score in enumerate(original_x):
             path_no_extension = (
-                f"{model_handler.model_dir}/generations/{timestamp}_{k}_original"
+                f"{decoder_handler.model_dir}/generations/{timestamp}_{k}"
             )
-            model_handler.dataloader_generator.write(tensor_score, path_no_extension)
+        decoder_handler.dataloader_generator.write(tensor_score, path_no_extension)
+    for k, tensor_score in enumerate(original_x):
+        path_no_extension = (
+            f"{decoder_handler.model_dir}/generations/{timestamp}_{k}_original"
+        )
+        decoder_handler.dataloader_generator.write(tensor_score, path_no_extension)
+    # for k, tensor_score in enumerate(x_postprocess):
+    #     path_no_extension = f'{decoder_handler.model_dir}/generations/{timestamp}_{k}_original_postprocess'
+    #     decoder_handler.dataloader_generator.write(tensor_score,
+    #                                                path_no_extension)
 
 
 if __name__ == "__main__":

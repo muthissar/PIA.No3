@@ -1,20 +1,18 @@
 import torch
-from CIA.dataset_managers.piano_helper import PianoIteratorGenerator
-from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
+from DatasetManager.piano.piano_helper import PianoIteratorGenerator
+from DatasetManager.piano.piano_midi_dataset import PianoMidiDataset
+
+from CIA.dataloaders.dataloader import DataloaderGenerator
 
 
-class PianoDataloaderGenerator:
+class PianoDataloaderGenerator(DataloaderGenerator):
     def __init__(
-        self,
-        sequences_size,
-        transformations,
-        offset_beginning,
-        offset_end,
-        num_elements,
-        *args,
-        **kwargs,
+        self, sequences_size, transformations, pad_before, num_elements, *args, **kwargs
     ):
+        legacy = True
+
         corpus_it_gen = PianoIteratorGenerator(subsets=[""], num_elements=num_elements)
+
         dataset: PianoMidiDataset = PianoMidiDataset(
             corpus_it_gen=corpus_it_gen,
             sequence_size=sequences_size,
@@ -23,11 +21,14 @@ class PianoDataloaderGenerator:
             time_dilation_factor=0.1,
             velocity_shift=20,
             transformations=transformations,
-            different_time_table_ts_duration=False,
-            offset_beginning=offset_beginning,
-            offset_end=offset_end,
+            different_time_table_ts_duration=not legacy,
+            # TODO(leo): this a bit too hardcoded
+            # Does not cover cases like before = PAD PAD PAD ... PAD START
+            offset_beginning=-63,
+            offset_end=-64,
         )
-        self.dataset = dataset
+
+        super(PianoDataloaderGenerator, self).__init__(dataset=dataset)
         self.features = ["pitch", "velocity", "duration", "time_shift"]
         self.num_channels = 4
 
@@ -35,9 +36,14 @@ class PianoDataloaderGenerator:
     def sequences_size(self):
         return self.dataset.sequence_size
 
-    def dataloaders(self, batch_size, shuffle_train=True, shuffle_val=False):
+    def dataloaders(
+        self, batch_size, num_workers=0, shuffle_train=True, shuffle_val=False
+    ):
         dataloaders = self.dataset.data_loaders(
-            batch_size, shuffle_train=shuffle_train, shuffle_val=shuffle_val
+            batch_size,
+            shuffle_train=shuffle_train,
+            shuffle_val=shuffle_val,
+            num_workers=num_workers,
         )
 
         def _build_dataloader(dataloader):
@@ -75,16 +81,13 @@ class PianoDataloaderGenerator:
         x is (batch_size, num_events, num_channels)
         """
         assert "time_shift" in self.features
-        assert x.shape[2] == 4
 
         timeshift_indices = x[:, :, self.features.index("time_shift")]
         # convert timeshift indices to their actual duration:
         y = self.dataset.timeshift_indices_to_elapsed_time(
             timeshift_indices, smallest_time_shift=0.02
         )
-        cumsum_y = y.cumsum(dim=-1)
-        assert torch.all(cumsum_y[:, 1:] >= cumsum_y[:, :-1] - 1e-3)
-        return cumsum_y
+        return y.cumsum(dim=-1)
 
     def get_feature_index(self, feature_name):
         return self.features.index(feature_name)

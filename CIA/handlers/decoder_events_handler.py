@@ -1,3 +1,6 @@
+# import functools
+import functools
+from typing import Any, Callable, Mapping, Optional, Tuple, Union, Iterable
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 from CIA.utils import (
@@ -12,7 +15,7 @@ from itertools import islice
 import numpy as np
 from torch.nn.parallel import DistributedDataParallel
 import torch.distributed as dist
-
+import einops
 
 # TODO duplicated code with decoder_prefix_handler.py
 class DecoderEventsHandler(Handler):
@@ -526,3 +529,170 @@ class DecoderEventsHandler(Handler):
 
         num_event_generated = decoding_end - decoding_start_event
         return x.cpu(), decoding_end, num_event_generated, done
+    @staticmethod
+    def integration(a : float, b : float, unique_timepoint : torch.Tensor, cum_ics: torch.Tensor): 
+            assert cum_ics.dim() == 2
+            res = torch.zeros_like(cum_ics[0])
+            for t, ic in zip(unique_timepoint, cum_ics):
+                if t >= a and t < b:
+                    res += ic
+                if t >= b:
+                    break
+            return res
+    def quant(
+            xs: Union[float, int, Iterable],
+            interpolator : Callable[[float, float], float],
+            end = Optional[float],
+        ):
+        if isinstance(xs, Iterable):
+            ys = torch.tensor(xs)
+        else:
+            assert end
+            if isinstance(xs, float):
+                step_size = xs
+                ys = torch.arange(0, end+(step_size-1e-9), step_size)
+            elif isinstance(xs, int):
+                steps = xs
+                ys = torch.linspace(0, end, steps)
+            else:
+                raise ValueError
+        return ys, torch.stack([interpolator(ys[i], ys[i+1]) for  i in range(len(ys)-1)],axis=0)
+
+    def compute_ic_template(
+        self,
+        x,
+        metadata_dict,
+        # temperature=1.0,
+        # top_p=1.0,
+        # top_k=0,
+        # num_max_generated_events=None,
+        # regenerate_first_ts=False,
+    ):
+        
+
+        unique_timepoint, cum_ics = self.compute_token_onsets(x, metadata_dict)
+        integrator = functools.partial(self.integration, unique_timepoint=unique_timepoint, cum_ics=cum_ics)
+        return integrator
+        
+    def compute_token_onsets(
+        self,
+        x,
+        metadata_dict,
+        match_original_onsets : Optional[Mapping[int, Any]] = None
+    ):
+        # TODO add arguments to preprocess
+        self.eval()
+        batch_size, num_events, _ = x.size()
+
+        # TODO only works with batch_size=1 at present
+        assert batch_size == 1
+
+        # decoding_end = None
+        # decoding_start_event = metadata_dict["decoding_start"]
+        # ics = torch.zeros_like(x)
+        # x[:, decoding_start_event:] = 0
+        with torch.no_grad():
+            # self.forward(target=x, metadata_dict=metadata_dict)
+            output, target_embedded, h_pe = self.model.module.compute_event_state(
+                x, metadata_dict, h_pe_init=None
+            )
+
+            # auto regressive predictions from output
+            weights_per_category = self.model.module.event_state_to_weights(
+                output=output, target_embedded=target_embedded
+            )
+            ics = []
+            # NOTE: only works for batch_size == 1
+            for w, x_, mask in zip(weights_per_category, x.permute(2,0,1), (~metadata_dict['loss_mask']).permute(2,0,1)):
+                w = w[mask]
+                x_ = x_[mask]
+                ic = torch.nn.functional.cross_entropy(input=w, target=x_, reduction='none')
+                ic = einops.rearrange(ic, '(b n) -> b n', b=batch_size)
+                ics.append(ic.cpu())
+            ics = torch.stack(ics, dim=-1)
+            middle_tokens = x[~metadata_dict['loss_mask']].view(batch_size, -1 , self.num_channels_target)
+            if match_original_onsets is not None:
+                onsets = torch.tensor(np.append(match_original_onsets, match_original_onsets[:, -1:], axis=1))
+            else:
+                cum_shifts = self.dataloader_generator.get_elapsed_time(middle_tokens)
+                onsets = cum_shifts.roll(1)
+                onsets[:, 0] = 0
+            # TODO: check if this is what we want...
+            timepoints = []
+            for onset, ic in zip(onsets.permute(1,0), ics.permute(1,0,2)):
+                onset = onset.item()
+                if timepoints and timepoints[-1][0] == onset:
+                    timepoints[-1][1] = timepoints[-1][1] + ic
+                else:
+                    timepoints.append([onset, ic])
+            unique_timepoint, cum_ics = zip(*timepoints)
+            cum_ics = torch.stack(cum_ics, dim=-1)
+            # TODO: remove batches everywhere because it's not working anyway
+            return unique_timepoint, cum_ics[0].T
+            # interpolations = [functools.partial(np.interp, xp=unique_timepoint, fp=cum_ic, left=None, right=None, period=None)
+            #                   for cum_ic in cum_ics[0]]
+            # 1+1
+            # # event_index corresponds to the position of the token BEING generated
+            # for event_index in range(decoding_start_event, num_events):
+            #     metadata_dict["original_sequence"] = x
+
+            #     # output is used to generate auto-regressively all
+            #     # channels of an event
+            #     output, target_embedded, h_pe = self.compute_event_state(
+            #         target=x,
+            #         metadata_dict=metadata_dict,
+            #     )
+
+            #     # extract correct event_step
+            #     output = output[:, event_index]
+
+            #     for channel_index in range(self.num_channels_target):
+            #         # target_embedded must be recomputed!
+            #         # TODO could be optimized
+            #         target_embedded = self.data_processor.embed(x)[:, event_index]
+            #         weights = self.event_state_to_weight_step(
+            #             output, target_embedded, channel_index
+            #         )
+            #         logits = weights / temperature
+
+            #         filtered_logits = []
+            #         for logit in logits:
+            #             filter_logit = top_k_top_p_filtering(
+            #                 logit, top_k=top_k, top_p=top_p
+            #             )
+            #             filtered_logits.append(filter_logit)
+            #         filtered_logits = torch.stack(filtered_logits, dim=0)
+            #         # Sample from the filtered distribution
+            #         p = to_numpy(torch.softmax(filtered_logits, dim=-1))
+            #         t_ = target[:, event_index+1, channel_index]
+            #         ic = - np.log(p[np.arange(len(t_)), t_])
+            #         # update generated sequence
+            #         for batch_index in range(batch_size):
+            #             if event_index >= decoding_start_event:
+            #                 new_pitch_index = np.random.choice(
+            #                     np.arange(
+            #                         self.num_tokens_per_channel_target[channel_index]
+            #                     ),
+            #                     p=p[batch_index],
+            #                 )
+            #                 x[batch_index, event_index, channel_index] = int(
+            #                     new_pitch_index
+            #                 )
+
+            #                 end_symbol_index = (
+            #                     self.dataloader_generator.dataset.value2index[
+            #                         self.dataloader_generator.features[channel_index]
+            #                     ]["END"]
+            #                 )
+            #                 if end_symbol_index == int(new_pitch_index):
+            #                     decoding_end = event_index
+
+            #         if decoding_end is not None:
+            #             break
+            #     if decoding_end is not None:
+            #         break
+            # if decoding_end is None:
+            #     done = False
+            #     decoding_end = num_events
+            # else:
+            #     done = True

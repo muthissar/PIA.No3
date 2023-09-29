@@ -1,3 +1,4 @@
+from warnings import warn
 from CIA.positional_embeddings.positional_embedding import BasePositionalEmbedding
 from torch import nn
 from CIA.utils import flatten
@@ -88,7 +89,9 @@ class SinusoidalProgressBarEmbedding(BasePositionalEmbedding):
 
         # TODO no progress bar for prefixes?!
         elapsed_time[:, : metadata_dict["decoding_start"]] = 0
-        elapsed_time[zeros_location, metadata_dict["decoding_start"] :] = 100
+        # TODO: this does not work with batch_size > 1. On the other hand if batch_size == 1 and 
+        assert not zeros_location, "Check if the updated next line is what is wanted."
+        elapsed_time[zeros_location.repeat(batch_size), metadata_dict["decoding_start"] :] = 100
 
         # add embedding_dim to elapsed time
         elapsed_time = elapsed_time.unsqueeze(2)

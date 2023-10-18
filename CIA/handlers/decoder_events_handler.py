@@ -1,10 +1,13 @@
 # import functools
-from dataclasses import dataclass
 import functools
+import os
+import time
 from typing import Any, Callable, Mapping, Optional, Tuple, Union, Iterable
 from warnings import warn
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
+# from CIA.ic import gen_interpolate
+from CIA.ic import ICRes, Interpolator, unique_timepoints
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,
@@ -548,7 +551,7 @@ class DecoderEventsHandler(Handler):
         # TODO add arguments to preprocess
         print(f'Placeholder duration: {metadata_dict["placeholder_duration"]}')
         self.eval()
-        batch_size, num_events, _ = x.size()
+        batch_size, num_events, n_feats = x.size()
         # TODO only works with batch_size=1 at present
         assert x.size(0) == 1
         index2value = self.dataloader_generator.dataset.index2value
@@ -557,14 +560,16 @@ class DecoderEventsHandler(Handler):
         generated_duration = torch.zeros(k_traces, x.shape[1])
         decoding_start_event = metadata_dict["decoding_start"]
         # NOTE: copy the original sequence:
+        original_sequence = x.detach().cpu().clone()
         x = x.detach().clone()
+        # TODO: deprecate all instances of setting original_sequence
         metadata_dict['original_sequence'] = x.detach().clone()
         timepoints_template, ic_template = self.compute_token_onsets(
             x=x,
             metadata_dict=metadata_dict
         )
         warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
-        interpolator_template = DecoderEventsHandler.gen_interpolate(
+        interpolator_template = Interpolator(
             ic_times=[timepoints_template],
             ics=[ic_template],
             weight_fn=weight_fn
@@ -586,165 +591,186 @@ class DecoderEventsHandler(Handler):
         event_indices = torch.tensor(k_traces*[decoding_start_event])
         x = einops.repeat(x, '1 ... -> k ...', k=k_traces).contiguous()
         ics = torch.zeros_like(x, dtype=torch.float32,device='cpu')
-        done = torch.zeros(k_traces, dtype=torch.bool, device='cpu')
+        done = torch.zeros((k_traces, n_feats), dtype=torch.bool, device='cpu')
         # warn('Next two lines only for debugging purposes...')
         # batch_indices = torch.tensor([0,0])
         # event_indices = torch.tensor([decoding_start_event, decoding_start_event])
         timepoint_idx = 0
         first_time_expand = True
-        first_index = 0
+        best_index = 0
         with torch.no_grad():
             # event_index corresponds to the position of the token BEING generated
             # for event_index in range(decoding_start_event, num_events):
-            warn('Change while true condition.')
-            while True:
-                if first_time_expand:
-                    # NOTE indices the sequences which did not yet exceed the timepoint prune limit
-                    batch_indices = torch.arange(k_traces)
-                    # TODO: remove contiguous
-                    event_indices[:] = einops.repeat(event_indices[first_index], '-> k', k=k_traces)
-                    generated_duration[:] = einops.repeat(generated_duration[first_index], '... -> k ...', k=k_traces)
-                    # unexceeded_timepoint = []
-                    x[:] = einops.repeat(x[first_index], '... -> k ...', k=k_traces)
-                    ics[:] = einops.repeat(ics[first_index], '... -> k ...', k=k_traces)
-                    first_time_expand = False
-                while len(batch_indices) > 0:
-                    max_idx = event_indices[batch_indices].max()
-                    x_ = x[batch_indices, :max_idx].contiguous()
-                    metadata_dict["original_sequence"] = x_.clone()
-                    # output is used to generate auto-regressively all
-                    # channels of an event
-                    warn('Check that metadata_dict is correctly used...')
-                    output_, target_embedded, h_pe = self.compute_event_state(
-                        target=x_,
-                        metadata_dict=metadata_dict,
-                    )
-
-                    # extract correct event_step
-                    output = output_[torch.arange(len(batch_indices)), event_indices[batch_indices]]
-
-                    unexceeded_timepoint = []
-                    for channel_index in range(self.num_channels_target):    
-                        # skip updates if we need to only recompute the FIRST TIMESHIFT
-                        if (
-                            (event_indices[batch_indices] == decoding_start_event).any()
-                            and regenerate_first_ts
-                            and channel_index < 3
-                        ):
-                            raise NotImplementedError('Check the functionality is meaningful for ic curves')
-                            continue
-
-                        # target_embedded must be recomputed!
-                        # TODO could be optimized
-                        target_embedded = self.data_processor.embed(x[batch_indices])[
-                            torch.arange(len(batch_indices)),
-                            event_indices[batch_indices]
-                        ]
-                        weights = self.event_state_to_weight_step(
-                            output, target_embedded, channel_index
+            rank = int(os.environ['RANK']) if 'RANK' in os.environ else 0
+            with tqdm(total=len(interpolation_time_points), position=rank+2, desc=f'Sampling rank: {rank}') as pbar:
+                while True:
+                    if first_time_expand:
+                        # NOTE indices the sequences which did not yet exceed the timepoint prune limit
+                        # start_time = time.time()
+                        not_done = ~done.any(-1)
+                        batch_indices = torch.arange(k_traces)[not_done]
+                        event_indices[not_done] = event_indices[best_index]
+                        generated_duration[not_done] = generated_duration[best_index]
+                        x[not_done] = x[best_index]
+                        ics[not_done] = ics[best_index]
+                        first_time_expand = False
+                        # print(f"expand time: {time.time()-start_time}")
+                    while len(batch_indices) > 0:
+                        # TODO: why does it only work with full sequence lenght?
+                        # max_idx = event_indices[batch_indices].max()
+                        max_idx = x.size(1)
+                        x_ = x[batch_indices, :max_idx].contiguous()
+                        metadata_dict["original_sequence"] = x_.clone()
+                        # output is used to generate auto-regressively all
+                        # channels of an event
+                        warn('Check that metadata_dict is correctly used...')
+                        # start_time = time.time()
+                        output_, target_embedded, h_pe = self.compute_event_state(
+                            target=x_,
+                            metadata_dict=metadata_dict,
                         )
-                        logits = weights / temperature
+                        # print(f"state time: {time.time()-start_time}")
+                        # NOTE: for longer generation, we need to do new preprocessing.
+                        # TODO: define hop length and then reprocess. However, how will this affect the placeholder duration?
+                        # Is it possible to simply minus the already generated time, and how does it work, when the placeholder duration is longer than the ones in
+                        # the training data? Maybe we can simply use the highest value that was use in the train set, but how does this work in reality????
+                        if x.size(1) in event_indices:
+                            raise NotImplementedError("this messes up if the sequence is exceeded in event_indices.")
+                        output = output_[torch.arange(len(batch_indices)), event_indices[batch_indices]]
 
-                        # Filter logits
-                        # filtered_logits = []
-                        # for logit in logits:
+                        unexceeded_timepoint = []
+                        # start_time = time.time()
+                        for channel_index in range(self.num_channels_target):    
+                            # skip updates if we need to only recompute the FIRST TIMESHIFT
+                            if (
+                                (event_indices[batch_indices] == decoding_start_event).any()
+                                and regenerate_first_ts
+                                and channel_index < 3
+                            ):
+                                raise NotImplementedError('Check the functionality is meaningful for ic curves')
+                                continue
 
-                        #     filter_logit = top_k_top_p_filtering(
-                        #         logit, top_k=top_k, top_p=top_p
-                        #     )
-                        #     filtered_logits.append(filter_logit)
-                        # filtered_logits = torch.stack(filtered_logits, dim=0)
-                        filtered_logits = logits
-                        # Sample from the filtered distribution
-                        p = to_numpy(torch.softmax(filtered_logits, dim=-1))
-                        # update generated sequence
-                        for p_, batch_index, event_index in zip(p, batch_indices,  event_indices[batch_indices]):
-                            # TODO: this check seems to be allways true, since we start with event_index == decoding_start_event
-                            if event_index >= decoding_start_event:
-                                new_pitch_index = np.random.choice(
-                                    np.arange(
-                                        self.num_tokens_per_channel_target[channel_index]
-                                    ),
-                                    p=p_,
-                                )
-                                x[batch_index, event_index, channel_index] = int(
-                                    new_pitch_index
-                                )
-                                ics[batch_index, event_index, channel_index] = p_[new_pitch_index].tolist()
+                            # target_embedded must be recomputed!
+                            # TODO could be optimized
+                            target_embedded = self.data_processor.embed(x[batch_indices])[
+                                torch.arange(len(batch_indices)),
+                                event_indices[batch_indices]
+                            ]
+                            weights = self.event_state_to_weight_step(
+                                output, target_embedded, channel_index
+                            )
+                            logits = weights / temperature
 
-                                end_symbol_index = (
-                                    self.dataloader_generator.dataset.value2index[
-                                        self.dataloader_generator.features[channel_index]
-                                    ]["END"]
-                                )
-                                if end_symbol_index == int(new_pitch_index):
-                                    warn('Find out if end can happen accross different channels?')
-                                    # NOTE: allow to stop the sequence if its "80% done"
-                                    done_pct = 0.8
-                                    if interpolation_time_points[timepoint_idx]/interpolation_time_points[-1] >=done_pct:    
-                                        done[batch_index] = True
-                                        decoding_end = event_index
-                                        print("End of decoding due to END symbol generation")
+                            # Filter logits
+                            # filtered_logits = []
+                            # for logit in logits:
 
-                                # Additional check:
-                                # if the generated duration is > than the
-                                # placeholder_duration
-                                # TODO hardcoded channel index for timeshifts
-                                if channel_index == 3:
-                                    generated_duration[batch_index, event_index] = generated_duration[batch_index, event_index - 1] + index2value["time_shift"][
+                            #     filter_logit = top_k_top_p_filtering(
+                            #         logit, top_k=top_k, top_p=top_p
+                            #     )
+                            #     filtered_logits.append(filter_logit)
+                            # filtered_logits = torch.stack(filtered_logits, dim=0)
+                            filtered_logits = logits
+                            # Sample from the filtered distribution
+                            p = to_numpy(torch.softmax(filtered_logits, dim=-1))
+                            # update generated sequence
+                            for p_, batch_index, event_index in zip(p, batch_indices,  event_indices[batch_indices]):
+                                # TODO: this check seems to be allways true, since we start with event_index == decoding_start_event
+                                if event_index >= decoding_start_event:
+                                    new_pitch_index = np.random.choice(
+                                        np.arange(
+                                            self.num_tokens_per_channel_target[channel_index]
+                                        ),
+                                        p=p_,
+                                    )
+                                    x[batch_index, event_index, channel_index] = int(
                                         new_pitch_index
-                                    ]
-                                    if generated_duration[batch_index, event_index] < interpolation_time_points[timepoint_idx]:
-                                        unexceeded_timepoint.append(batch_index)
-                                    if generated_duration[batch_index, event_index] > placeholder_duration:
-                                        raise NotImplementedError
-                                        decoding_end = event_index + 1
-                                        print(
-                                            "End of decoding due to the generation > than placeholder duration"
-                                        )
-                                        print(
-                                            f"Excess: {generated_duration - placeholder_duration}"
-                                        )
+                                    )
+                                    ics[batch_index, event_index, channel_index] = p_[new_pitch_index].tolist()
+
+                                    end_symbol_index = (
+                                        self.dataloader_generator.dataset.value2index[
+                                            self.dataloader_generator.features[channel_index]
+                                        ]["END"]
+                                    )
+                                    if end_symbol_index == int(new_pitch_index):
+                                        warn('Find out if end can happen accross different channels?')
+                                        # NOTE if a sequence is done, we keep it's interpolation and continue
+                                        # computing the rest of the timepoints
+                                        done_pct = 0.8
+                                        if interpolation_time_points[timepoint_idx]/interpolation_time_points[-1] >=done_pct:    
+                                            done[batch_index, channel_index] = True
+                                            decoding_end = event_index
+                                            print("End of decoding due to END symbol generation")
+
+                                    # Additional check:
+                                    # if the generated duration is > than the
+                                    # placeholder_duration
+                                    # TODO hardcoded channel index for timeshifts
+                                    if channel_index == 3:
+                                        shift = index2value["time_shift"][
+                                            new_pitch_index
+                                        ]
+                                        shift = 0.0 if shift == 'END' else shift
+                                        generated_duration[batch_index, event_index] = generated_duration[batch_index, event_index - 1] + shift
+                                        if generated_duration[batch_index, event_index] < interpolation_time_points[timepoint_idx]:
+                                            unexceeded_timepoint.append(batch_index)
+                                        if generated_duration[batch_index, event_index] > placeholder_duration:
+                                            raise NotImplementedError
+                                            decoding_end = event_index + 1
+                                            print(
+                                                "End of decoding due to the generation > than placeholder duration"
+                                            )
+                                            print(
+                                                f"Excess: {generated_duration - placeholder_duration}"
+                                            )
+                        # print(f"events time: {time.time()-start_time}")
+                        event_indices[batch_indices] += 1    
+                        batch_indices = torch.LongTensor(unexceeded_timepoint)
                         if decoding_end is not None:
                             break
-                    event_indices[batch_indices] += 1    
-                    batch_indices = torch.LongTensor(unexceeded_timepoint)
-                    if decoding_end is not None:
-                        break 
-                ic_times_list = [dur[decoding_start_event-1:event_index-1] for dur, event_index in zip(generated_duration, event_indices)]
-                ics_list = [ic[decoding_start_event:event_index] for ic,event_index in zip(ics, event_indices)]
-                interpolator = DecoderEventsHandler.gen_interpolate(
-                    ic_times = ic_times_list,
-                    ics = ics_list,
-                    weight_fn = DecoderEventsHandler.mov_avg,
-                )
-                ts = interpolation_time_points[timepoint_idx:timepoint_idx+1]
-                int_time = interpolator(ts)
-                int_time_temp = interpolator_template(ts)
-                # NOTE: for now just 
-                abs_diffs = (int_time.sum(2) - int_time_temp.sum(2)).abs().sum(dim=(1))
-                _, min_id = abs_diffs.min(dim=0)
+                    # TODO: we can optimize this by only computing for the ones actively expanded (i.e. in batch_index),
+                    # start_time = time.time()
+                    ic_times_list = [dur[decoding_start_event-1:event_index-1] for dur, event_index in zip(generated_duration, event_indices)]
+                    ics_list = [ic[decoding_start_event:event_index] for ic,event_index in zip(ics, event_indices)]
+                    interpolator = Interpolator(
+                        ic_times = ic_times_list,
+                        ics = ics_list,
+                        weight_fn = weight_fn,
+                    )
+                    ts = interpolation_time_points[timepoint_idx:timepoint_idx+1]
+                    int_time = interpolator(ts)
+                    int_time_temp = interpolator_template(ts)
+                    # NOTE: for now we just compute the abs of the sum of all channels
+                    abs_diffs = (int_time.sum(2) - int_time_temp.sum(2)).abs().sum(dim=(1))
+                    _, best_index_all = abs_diffs.min(dim=0)
+                    abs_diffs[done.any(-1)] = float('inf')
+                    _, best_index = abs_diffs.min(dim=0)
+                    # NOTE: keep the best already done sequences, 
+                    done[:] = False
+                    if done[best_index_all].any():
+                        if not done[best_index_all].all():
+                            warn('Shouldn\'t all channels be done?')
+                        done[best_index_all] = True
 
-                # NOTE: store pruned in first 
-                batch_indices = torch.tensor([first_index])
-                event_indices[first_index] = event_indices[min_id]
-                generated_duration[first_index] = generated_duration[min_id]
-                # unexceeded_timepoint = []
-                x[first_index] = x[min_id]
-                ics[first_index] = ics[min_id]
-                first_time_expand = True
-                timepoint_idx += 1
-                if timepoint_idx == len(interpolation_time_points):
-                    decoding_end = event_indices[first_index].item()
-
-
-                    break
-            warn('What to do here?')
-            # if decoding_end is None:
-            #     done = False
-            #     decoding_end = num_events
-            # else:
-            #     done = True
+                    # NOTE: store pruned in first 
+                    # batch_indices = torch.tensor([best_index])
+                    # event_indices[first_index] = event_indices[min_id]
+                    # generated_duration[first_index] = generated_duration[min_id]
+                    # unexceeded_timepoint = []
+                    # x[first_index] = x[min_id]
+                    # ics[first_index] = ics[min_id]
+                    first_time_expand = True
+                    warn("while do until it's above the threshold")
+                    timepoint_idx += 1
+                    # NOTE: for some reason as soon as we get to here, it starts to be slow.
+                    # its likely to be caused by cache misses.
+                    # answ : no speedup is due to reducing batch index, such that fewer and fewer samples are computed...
+                    # print(f"interpolate: {time.time()-start_time}")
+                    pbar.update()
+                    if timepoint_idx == len(interpolation_time_points):
+                        decoding_end = event_indices[best_index_all].item()
+                        break
         warn('What to do here?')
         # num_event_generated = decoding_end - decoding_start_event
 
@@ -755,24 +781,18 @@ class DecoderEventsHandler(Handler):
         # generated_region = x[first_index, decoding_start_event:decoding_end][None].cpu()
         # # TODO return everything on GPU
         # return x[first_index].cpu(), generated_region, decoding_end, num_event_generated, done
-        @dataclass
-        class ICRes:
-            tok: torch.Tensor
-            ic_tok: torch.Tensor
-            ic_int: torch.Tensor
-            timepoints: torch.Tensor
-            decoding_end: Optional[int] = None
         temp = ICRes(
-            metadata_dict['original_sequence'],
+            original_sequence,
             ic_template,
             interpolator_template(interpolation_time_points)[0],
-            timepoints_template
+            timepoints_template,
+            decoding_end=metadata_dict['decoding_end'].item()
         )
         gen = ICRes(
-            x[first_index].cpu(),
-            ics[first_index].cpu(),
-            interpolator(interpolation_time_points)[first_index],
-            ic_times_list[first_index],
+            x[best_index].cpu(),
+            ics[best_index].cpu(),
+            interpolator(interpolation_time_points)[best_index],
+            ic_times_list[best_index],
             decoding_end
         )
         return temp, gen
@@ -790,32 +810,6 @@ class DecoderEventsHandler(Handler):
                     break
             return res
     
-    @staticmethod
-    def mov_avg(time_diffs : torch.FloatTensor) -> torch.Tensor:
-        # NOTE: (bz, T, tokens)
-        window_size = 0.5
-        c = 0.
-        mov_avg = (-c*time_diffs).exp()
-        mov_avg[time_diffs>=window_size] = 0
-        return mov_avg
-    @staticmethod
-    def gen_interpolate(
-            ic_times : Iterable[torch.FloatTensor],
-            ics: Iterable[torch.FloatTensor],
-            weight_fn: Callable[[torch.FloatTensor], torch.FloatTensor]
-        ) ->  Callable[[torch.FloatTensor], torch.FloatTensor]:
-        lens = [len(ic) for ic in ics]
-        assert all(l == len(ic) for l, ic in zip(lens, ics))
-        ic_times = torch.nn.utils.rnn.pad_sequence(ic_times, batch_first=True)
-        ics = torch.nn.utils.rnn.pad_sequence(ics, batch_first=True)
-        def interpolate(t : torch.FloatTensor) -> torch.FloatTensor:
-            # NOTE: a matrix of (bz, T, TOKENS)
-            time_diffs = t[None, :, None] - ic_times[:, None]
-            w = weight_fn(time_diffs)
-            w[time_diffs <.0] = 0.
-            # NOTE: automatically the padding cancels automatically because of the ic padding.
-            return einops.einsum(w, ics, 'bz T tok, bz tok ... -> bz T ...')
-        return interpolate
     def quant(
             xs: Union[float, int, Iterable],
             interpolator : Callable[[float, float], float],
@@ -895,21 +889,7 @@ class DecoderEventsHandler(Handler):
                 # onsets = cum_shifts.roll(1)
                 # onsets[:, 0] = 0
             # TODO: check if this is what we want...
-            unique_timepoint, cum_ics = DecoderEventsHandler.unique_timepoints(onsets[0], ics[0])
+            unique_timepoint, cum_ics = unique_timepoints(onsets[0], ics[0])
             
             # TODO: remove batches everywhere because it's not working anyway
             return unique_timepoint, cum_ics
-    @staticmethod
-    def unique_timepoints(onsets : torch.Tensor, ics : torch.Tensor):
-        assert ics.dim() == 2 and onsets.dim() == 1, "Batched not implimented..."
-        timepoints = []
-        for onset, ic in zip(onsets, ics):
-            onset = onset.item()
-            if timepoints and timepoints[-1][0] == onset:
-                timepoints[-1][1] = timepoints[-1][1] + ic
-            else:
-                timepoints.append([onset, ic])
-        unique_timepoint, cum_ics = zip(*timepoints)
-        unique_timepoint = torch.tensor(unique_timepoint)
-        cum_ics = torch.stack(cum_ics, dim=0)
-        return unique_timepoint, cum_ics

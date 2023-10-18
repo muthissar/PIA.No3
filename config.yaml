@@ -1,0 +1,15 @@
+# 
+app:
+  pieces: [
+    '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Bach, Carl Philipp Emanuel, Keyboard Sonata in F major, H.55, zRPTf8eGLWc.mid',
+    ]
+  # GPU: 0
+  # NOTE: range of timepoits
+  ts: [0.5, 60., 0.5]
+  k_traces: 4
+  weight:
+    class_path: CIA.ic.MovingAverage
+    init_args:
+      window_size: 0.5
+      c: 0.
+  samples_per_template: 16

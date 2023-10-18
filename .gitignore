@@ -10,3 +10,5 @@ examples/
 *.pyc
 workspace.code-workspace
 *.pickle
+
+out/

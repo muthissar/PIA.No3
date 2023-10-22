@@ -1,4 +1,3 @@
-# import functools
 import functools
 import os
 import time
@@ -7,7 +6,7 @@ from warnings import warn
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 # from CIA.ic import gen_interpolate
-from CIA.ic import ICRes, Interpolator, unique_timepoints
+from CIA.ic import ICRes, Interpolator, Piece, unique_timepoints
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,
@@ -542,6 +541,7 @@ class DecoderEventsHandler(Handler):
         interpolation_time_points,
         k_traces,
         weight_fn,
+        piece: Piece,
         temperature=1.0,
         top_p=1.0,
         top_k=0,
@@ -555,17 +555,19 @@ class DecoderEventsHandler(Handler):
         # TODO only works with batch_size=1 at present
         assert x.size(0) == 1
         index2value = self.dataloader_generator.dataset.index2value
-        decoding_end = None
+        # decoding_end = None
         placeholder_duration = metadata_dict["placeholder_duration"].item()
         generated_duration = torch.zeros(k_traces, x.shape[1])
         decoding_start_event = metadata_dict["decoding_start"]
+        template_decoding_end = metadata_dict["decoding_end"].item()
         # NOTE: copy the original sequence:
         original_sequence = x.detach().cpu().clone()
         x = x.detach().clone()
         # TODO: deprecate all instances of setting original_sequence
-        metadata_dict['original_sequence'] = x.detach().clone()
+        # metadata_dict['original_sequence'] = x.detach().clone()
+        # NOTE: this is only for the middle tokens!
         timepoints_template, ic_template = self.compute_token_onsets(
-            x=x,
+            x=metadata_dict['original_sequence'],
             metadata_dict=metadata_dict
         )
         warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
@@ -634,8 +636,6 @@ class DecoderEventsHandler(Handler):
                         # TODO: define hop length and then reprocess. However, how will this affect the placeholder duration?
                         # Is it possible to simply minus the already generated time, and how does it work, when the placeholder duration is longer than the ones in
                         # the training data? Maybe we can simply use the highest value that was use in the train set, but how does this work in reality????
-                        if x.size(1) in event_indices:
-                            raise NotImplementedError("this messes up if the sequence is exceeded in event_indices.")
                         output = output_[torch.arange(len(batch_indices)), event_indices[batch_indices]]
 
                         unexceeded_timepoint = []
@@ -693,14 +693,15 @@ class DecoderEventsHandler(Handler):
                                             self.dataloader_generator.features[channel_index]
                                         ]["END"]
                                     )
+                                    # TODO: move all termination checks together, for better readability.
                                     if end_symbol_index == int(new_pitch_index):
                                         warn('Find out if end can happen accross different channels?')
                                         # NOTE if a sequence is done, we keep it's interpolation and continue
                                         # computing the rest of the timepoints
                                         done_pct = 0.8
-                                        if interpolation_time_points[timepoint_idx]/interpolation_time_points[-1] >=done_pct:    
+                                        if interpolation_time_points[timepoint_idx]/interpolation_time_points[-1] >=done_pct:
                                             done[batch_index, channel_index] = True
-                                            decoding_end = event_index
+                                            # decoding_end = event_index
                                             print("End of decoding due to END symbol generation")
 
                                     # Additional check:
@@ -713,22 +714,31 @@ class DecoderEventsHandler(Handler):
                                         ]
                                         shift = 0.0 if shift == 'END' else shift
                                         generated_duration[batch_index, event_index] = generated_duration[batch_index, event_index - 1] + shift
-                                        if generated_duration[batch_index, event_index] < interpolation_time_points[timepoint_idx]:
-                                            unexceeded_timepoint.append(batch_index)
-                                        if generated_duration[batch_index, event_index] > placeholder_duration:
-                                            raise NotImplementedError
-                                            decoding_end = event_index + 1
+                                        if event_index == x.size(1) - 1:
+                                            print("End of decoding due to reaching last sequence index")
+                                            print(
+                                                f"Missing: {generated_duration - placeholder_duration}"
+                                            )
+                                            done[batch_index, channel_index] = True
+                                        elif generated_duration[batch_index, event_index] > placeholder_duration:
+                                            # raise NotImplementedError
+                                            # decoding_end = event_index + 1
                                             print(
                                                 "End of decoding due to the generation > than placeholder duration"
                                             )
                                             print(
-                                                f"Excess: {generated_duration - placeholder_duration}"
+                                                f"Excess: {generated_duration[batch_index, event_index] - placeholder_duration}"
                                             )
+                                            done[batch_index, channel_index] = True
+                                        elif generated_duration[batch_index, event_index] < interpolation_time_points[timepoint_idx]:
+                                            unexceeded_timepoint.append(batch_index)
                         # print(f"events time: {time.time()-start_time}")
                         event_indices[batch_indices] += 1    
                         batch_indices = torch.LongTensor(unexceeded_timepoint)
-                        if decoding_end is not None:
-                            break
+                        # if x.size(1) in event_indices:
+                        #     raise NotImplementedError("this messes up if the sequence is exceeded in event_indices.")
+                        # if decoding_end is not None:
+                        #     break
                     # TODO: we can optimize this by only computing for the ones actively expanded (i.e. in batch_index),
                     # start_time = time.time()
                     ic_times_list = [dur[decoding_start_event-1:event_index-1] for dur, event_index in zip(generated_duration, event_indices)]
@@ -744,6 +754,12 @@ class DecoderEventsHandler(Handler):
                     # NOTE: for now we just compute the abs of the sum of all channels
                     abs_diffs = (int_time.sum(2) - int_time_temp.sum(2)).abs().sum(dim=(1))
                     _, best_index_all = abs_diffs.min(dim=0)
+                    # TODO: remove the termination from here to reduce spaghetti code
+                    if done.all() or timepoint_idx == len(interpolation_time_points) - 1:
+                        decoding_end = event_indices[best_index_all].item()
+                        # NOTE: to allign with the decoding_end which is pointing to the end token... 
+                        decoding_end +=1
+                        break
                     abs_diffs[done.any(-1)] = float('inf')
                     _, best_index = abs_diffs.min(dim=0)
                     # NOTE: keep the best already done sequences, 
@@ -768,9 +784,7 @@ class DecoderEventsHandler(Handler):
                     # answ : no speedup is due to reducing batch index, such that fewer and fewer samples are computed...
                     # print(f"interpolate: {time.time()-start_time}")
                     pbar.update()
-                    if timepoint_idx == len(interpolation_time_points):
-                        decoding_end = event_indices[best_index_all].item()
-                        break
+                    # if timepoint_idx == len(interpolation_time_points):
         warn('What to do here?')
         # num_event_generated = decoding_end - decoding_start_event
 
@@ -782,18 +796,20 @@ class DecoderEventsHandler(Handler):
         # # TODO return everything on GPU
         # return x[first_index].cpu(), generated_region, decoding_end, num_event_generated, done
         temp = ICRes(
-            original_sequence,
+            original_sequence[0],
             ic_template,
             interpolator_template(interpolation_time_points)[0],
             timepoints_template,
-            decoding_end=metadata_dict['decoding_end'].item()
+            decoding_end=template_decoding_end,
+            piece = piece
         )
         gen = ICRes(
             x[best_index].cpu(),
             ics[best_index].cpu(),
             interpolator(interpolation_time_points)[best_index],
             ic_times_list[best_index],
-            decoding_end
+            decoding_end,
+            piece = piece
         )
         return temp, gen
         # return x[first_index].cpu(), ics[first_index].cpu(), ic_template,\
@@ -849,7 +865,7 @@ class DecoderEventsHandler(Handler):
         self,
         x : torch.Tensor,
         metadata_dict : dict,
-        match_original_onsets : Optional[Mapping[int, Any]] = None
+        # match_original_onsets : Optional[Mapping[int, Any]] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # TODO add arguments to preprocess
         self.eval()
@@ -876,20 +892,23 @@ class DecoderEventsHandler(Handler):
                 ic = einops.rearrange(ic, '(b n) -> b n', b=batch_size)
                 ics.append(ic.cpu())
             ics = torch.stack(ics, dim=-1)
-            middle_tokens = x[~metadata_dict['loss_mask']].view(batch_size, -1 , self.num_channels_target)
-            if match_original_onsets is not None:
-                onsets = torch.tensor(np.append(match_original_onsets, match_original_onsets[:, -1:], axis=1))
-            else:
-                # TODO: There's some small deviation between this calculation and the one obtained by simply using the cum
-                onsets = torch.cumsum(torch.tensor(
-                    [0]+[self.dataloader_generator.dataset.index2value['time_shift'][tok[3].item()] for tok in middle_tokens[0,:-1]]
-                ), dim=0
-                )[None]
-                # cum_shifts = self.dataloader_generator.get_elapsed_time(middle_tokens)
-                # onsets = cum_shifts.roll(1)
-                # onsets[:, 0] = 0
+            # middle_tokens = x[~metadata_dict['loss_mask']].view(batch_size, -1 , self.num_channels_target)
+            middle_slice = slice(metadata_dict['decoding_start'], metadata_dict['decoding_end']-1)
+            middle_tokens = x[0, middle_slice]
+            # if match_original_onsets is not None:
+            #     onsets = torch.tensor(np.append(match_original_onsets, match_original_onsets[:, -1:], axis=1))
+            # else:
+            # TODO: There's some small deviation between this calculation and the one obtained by simply using the cum
+            onsets = torch.cumsum(torch.tensor(
+                [0]+[self.dataloader_generator.dataset.index2value['time_shift'][tok[3].item()] for tok in middle_tokens]
+            ), dim=0
+            )
+            # cum_shifts = self.dataloader_generator.get_elapsed_time(middle_tokens)
+            # onsets = cum_shifts.roll(1)
+            # onsets[:, 0] = 0
             # TODO: check if this is what we want...
-            unique_timepoint, cum_ics = unique_timepoints(onsets[0], ics[0])
+            ics_middle = ics[0, middle_slice]
+            unique_timepoint, cum_ics = unique_timepoints(onsets, ics_middle)
             
             # TODO: remove batches everywhere because it's not working anyway
             return unique_timepoint, cum_ics

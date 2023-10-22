@@ -53,6 +53,10 @@ class MovingAverage(Callable[[torch.FloatTensor], torch.FloatTensor]):
         mov_avg[time_diffs>=self.window_size] = 0
         return mov_avg
 
+@dataclass
+class Piece:
+    path: str
+    start_node: int
 
 @dataclass
 class ICRes:
@@ -60,8 +64,8 @@ class ICRes:
     ic_tok: torch.Tensor
     ic_int: torch.Tensor
     timepoints: torch.Tensor
-    decoding_end: Optional[int] = None
-
+    decoding_end: int
+    piece: Piece
     def write(self, p : Path):
         torch.save(obj=self, f=p)
     @classmethod
@@ -80,3 +84,4 @@ def unique_timepoints(onsets : torch.Tensor, ics : torch.Tensor):
     unique_timepoint = torch.tensor(unique_timepoint)
     cum_ics = torch.stack(cum_ics, dim=0)
     return unique_timepoint, cum_ics
+

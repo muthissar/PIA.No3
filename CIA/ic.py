@@ -57,6 +57,7 @@ class MovingAverage(Callable[[torch.FloatTensor], torch.FloatTensor]):
 class Piece:
     path: str
     start_node: int
+    n_inpaint: int
 
 @dataclass
 class ICRes:

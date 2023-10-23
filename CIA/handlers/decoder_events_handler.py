@@ -717,7 +717,7 @@ class DecoderEventsHandler(Handler):
                                         if event_index == x.size(1) - 1:
                                             print("End of decoding due to reaching last sequence index")
                                             print(
-                                                f"Missing: {generated_duration - placeholder_duration}"
+                                                f"Missing: {generated_duration[batch_index, event_index] - placeholder_duration}"
                                             )
                                             done[batch_index, channel_index] = True
                                         elif generated_duration[batch_index, event_index] > placeholder_duration:
@@ -755,19 +755,19 @@ class DecoderEventsHandler(Handler):
                     abs_diffs = (int_time.sum(2) - int_time_temp.sum(2)).abs().sum(dim=(1))
                     _, best_index_all = abs_diffs.min(dim=0)
                     # TODO: remove the termination from here to reduce spaghetti code
-                    if done.all() or timepoint_idx == len(interpolation_time_points) - 1:
+                    if done.any(-1).all() or timepoint_idx == len(interpolation_time_points) - 1:
                         decoding_end = event_indices[best_index_all].item()
                         # NOTE: to allign with the decoding_end which is pointing to the end token... 
                         decoding_end +=1
                         break
                     abs_diffs[done.any(-1)] = float('inf')
                     _, best_index = abs_diffs.min(dim=0)
-                    # NOTE: keep the best already done sequences, 
-                    done[:] = False
                     if done[best_index_all].any():
-                        if not done[best_index_all].all():
-                            warn('Shouldn\'t all channels be done?')
+                        done[:] = False    
                         done[best_index_all] = True
+                    else:
+                        # in this case as the finished sequence is worse than another sequence, don't keep any.
+                        done[:] = False    
 
                     # NOTE: store pruned in first 
                     # batch_indices = torch.tensor([best_index])
@@ -785,7 +785,6 @@ class DecoderEventsHandler(Handler):
                     # print(f"interpolate: {time.time()-start_time}")
                     pbar.update()
                     # if timepoint_idx == len(interpolation_time_points):
-        warn('What to do here?')
         # num_event_generated = decoding_end - decoding_start_event
 
         # print(
@@ -812,9 +811,6 @@ class DecoderEventsHandler(Handler):
             piece = piece
         )
         return temp, gen
-        # return x[first_index].cpu(), ics[first_index].cpu(), ic_template,\
-        #     interpolator(interpolation_time_points)[first_index], \
-        #         interpolator_template(interpolation_time_points)[0], decoding_end
     @staticmethod
     def integration(a : float, b : float, unique_timepoint : torch.Tensor, cum_ics: torch.Tensor): 
             assert cum_ics.dim() == 2

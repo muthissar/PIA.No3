@@ -98,7 +98,7 @@ def main(c :Config):
     # TODO: check correct number...
     # num_events_middle = 1024 - 6
     # num_events_middle = 512 - 5 # magic - 5 for special tokens
-    num_events_middle = 256
+    # num_events_middle = 256
     num_max_generated_events = 1024 - 6
 
     load = True
@@ -174,6 +174,7 @@ def main(c :Config):
         # NOTE: parallelize over number of samples per piece
         ds : PianoMidiDataset = dataloader_generator.dataset
         sequence = ds.process_score(piece.path)
+        orig_seq_length = len(sequence['pitch'])
         sequence = ds.add_start_end_symbols(
             sequence, start_time=piece.start_node, sequence_size=ds.sequence_size
         )
@@ -181,7 +182,6 @@ def main(c :Config):
         sample = ds.tokenize(sequence)
         x = torch.tensor([sample[e] for e in dataloader_generator.features])
         original_x = einops.rearrange(x, 'f n -> 1 n f')
-        x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=num_events_middle)
         for i in tqdm.tqdm(np.arange(rank, c.samples_per_template, world_size), desc='sample pr piece', disable=rank != 0, position=1):
             # dataloader_generator.dataset.split = split
             # data = dataloader_generator.dataset[id_]
@@ -196,7 +196,9 @@ def main(c :Config):
             # before  middle  after -> before  placeholder  after  SOD (start of decoding)  middle  END XX XX (pad)
             # NOTE: metadata_dict['decoding_end'] is not used for inpaint_non_optimized 
             # dataloader_generator.dataset.process_score('/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Bach, Carl Philipp Emanuel, Keyboard Sonata in F 
-            x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=num_events_middle)
+            x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=piece.n_inpaint)
+            warn("In place changing decoding_end, possible bug")
+            metadata_dict['decoding_end'] = min(torch.tensor(orig_seq_length + 3, device=metadata_dict['decoding_end'].device), metadata_dict['decoding_end'])
             ts = torch.arange(0, metadata_dict['placeholder_duration'].item(), c.step)
             # # "open ended"
             # secs_dec = 25.
@@ -265,9 +267,10 @@ def main(c :Config):
             file_folder = piece_folder.joinpath(f'{i}')
             file_folder.mkdir(exist_ok=True, parents=True)
             gen.write(file_folder.joinpath(f'ic.pt'))
-        file_folder = piece_folder.joinpath('temp')
-        file_folder.mkdir(exist_ok=True, parents=True)
-        temp.write(file_folder.joinpath(f'ic.pt'))
+            if i == 0 and rank == 0:
+                file_folder = piece_folder.joinpath('temp')
+                file_folder.mkdir(exist_ok=True, parents=True)
+                temp.write(file_folder.joinpath(f'ic.pt'))
 
         # x_inpainted = torch.cat([before, generated_region, after, end], axis=1)
         # x_inpainted = data_processor.postprocess(x_gen, decoding_end, metadata_dict)
@@ -291,8 +294,9 @@ def plot(c : Config):
         data_processor_type=config["data_processor_type"],
         data_processor_kwargs=config["data_processor_kwargs"],
     )
-    for song_dir in [f for f in c.out.glob('*/') if f.is_dir()]:
-        temp_file = song_dir.joinpath('temp/ic.pt')
+    for temp_file in [f for f in c.out.glob('*/temp/ic.pt')]:
+        # temp_file = song_dir.joinpath('temp/ic.pt')
+        song_dir = temp_file.parent.parent
         res_temp = ICRes.load(p=temp_file)
         num_middle_tokens = res_temp.decoding_end-1 - (data_processor.num_events_after+data_processor.num_events_before+2)
         temp_midi = temp_file.parent.joinpath(f'song.mid')
@@ -320,45 +324,39 @@ def plot(c : Config):
             fig, ax = plt.subplots(len(files) * figs_pr_sample, 1, figsize=(15,9), sharex=True)
             for i, (f, r) in enumerate(zip(files, res)):
                 midi = pretty_midi.PrettyMIDI(str(f))
-                # first_onset = min([n.start for n in  midi2.instruments[0].notes])
-                # for note in midi2.instruments[0].notes:
-                #     note.start -= first_onset
-                #     note.end -= first_onset
-                # delta = 1e-6
-                # for cc in midi2.instruments[0].control_changes:
-                #     cc.time -= first_onset
-                #     if cc.time < 0:
-                #         cc.time = 0
                 sr = 10
-                pr2 = midi.get_piano_roll(sr).T
-                end = pr2.shape[0]/sr
+                piano_roll = midi.get_piano_roll(sr).T
+                end = piano_roll.shape[0]/sr
 
 
                 legends = dataloader_generator.features
-                bs = 2
 
-                nr = (24,96)
-                # nr = (None, None)
+                pitch_range = (24,96)
+                # pitch_range = (None, None)
                 ax[i *figs_pr_sample + 0].imshow(
-                    pr2.T[slice(*nr)],
+                    piano_roll.T[slice(*pitch_range)],
                     origin='lower',
-                    extent=[0, end, *nr],
+                    extent=[0, end, *pitch_range],
                     aspect='auto',
                     interpolation='none',
                     cmap='plasma',
                 )
-
-                channels = slice(0, 4)
-                n_channels = channels.stop- channels.start
-                unique_timepoints_, cum_ics = unique_timepoints(r.timepoints, r.ic_tok)
+                # TODO: this low level time calculation of tokens should not be here.
                 time_before = torch.sum(torch.tensor(
                     [dataloader_generator.dataset.index2value['time_shift'][tok[3].item()] for tok in before]
                 ), dim=0).item()
+                time_middle = torch.sum(torch.tensor(
+                    [dataloader_generator.dataset.index2value['time_shift'][tok[3].item()] for tok in middle_tokens]
+                ), dim=0).item() + time_before
+                ax[i *figs_pr_sample + 0].vlines([time_before,time_middle], *pitch_range, color='r', alpha=0.5)
+                channels = slice(0, 4)
+                n_channels = channels.stop- channels.start
+                unique_timepoints_, cum_ics = unique_timepoints(r.timepoints, r.ic_tok)
+
                 unique_timepoints_ += time_before
                 n_points = len(unique_timepoints_)
                 # ax[1].plot(unique_timepoint, cum_ics[:, channel],'.-')
                 c_ = np.broadcast_to(np.arange(n_channels)[None,:], (n_points, n_channels)).flatten()
-
                 times = np.broadcast_to(np.array(unique_timepoints_)[:,None], (n_points, n_channels)).flatten()
                 scatter = ax[i*figs_pr_sample+1].scatter(
                     times,
@@ -371,15 +369,15 @@ def plot(c : Config):
                                     loc="lower left", title="Classes")
                 ax[i*figs_pr_sample+1].add_artist(legend1)
 
-                warn('reimpliment these plots!')
-                # ax[i*figs_pr_sample+2].step(c.tim, r.ic_int[:, channels], where='post')
-                # ax[i*figs_pr_sample+2].legend(legends[channels])
+                n_steps = len(r.ic_int)
+                ts = np.linspace(0, (n_steps-1)*c.step, n_steps) + time_before
+                ax[i*figs_pr_sample+2].step(ts, r.ic_int[:, channels], where='post')
+                ax[i*figs_pr_sample+2].legend(legends[channels])
 
-                # ax[i*figs_pr_sample+3].step(c.step, r.ic_int[:, channels].sum(1), where='post')
+                ax[i*figs_pr_sample+3].step(ts, r.ic_int[:, channels].sum(1), where='post')
                 
                 fig.tight_layout()
             plt.savefig(sample.parent.joinpath('ic_curve.pdf'))
-
 
 
 if __name__ == "__main__":

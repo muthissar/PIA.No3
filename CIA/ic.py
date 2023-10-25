@@ -63,8 +63,9 @@ class Piece:
 class ICRes:
     tok: torch.Tensor
     ic_tok: torch.Tensor
-    ic_int: torch.Tensor
     timepoints: torch.Tensor
+    ic_int: torch.Tensor
+    timepoints_int: torch.Tensor
     decoding_end: int
     piece: Piece
     def write(self, p : Path):

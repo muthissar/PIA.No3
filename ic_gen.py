@@ -289,12 +289,14 @@ def main(c :Config):
         # x_inpainted_orig = data_processor.postprocess(original_x, decoding_end, metadata_dict)
         # print(f"Time of generated sequence {dataloader_generator.get_elapsed_time(x_inpainted[0][None])[0,-1]}")
         # dataloader_generator.write(x_inpainted_orig[0], 'out/orig')
+def express_to_suplot(fig_plotly, explot, row, col):
+    for trace in explot.data:
+        trace.showlegend = False
+        fig_plotly.add_trace(trace, row=row, col=col)
 def plot(c : Config):
     config = importlib.import_module('.config_autoreg', f'{model_dir.replace("/", ".")}').config
     for t in ['time_dilation', 'velocity_shift', 'transposition']:
         config['dataloader_generator_kwargs']['transformations'][t] = False
-    # config['data_processor_kwargs']['num_events_before'] = 1
-    # config['data_processor_kwargs']['num_events_after'] = 0
     dataloader_generator = get_dataloader_generator(
         dataset=config["dataset"],
         dataloader_generator_kwargs=config["dataloader_generator_kwargs"],
@@ -325,8 +327,6 @@ def plot(c : Config):
                     continue
                 res_gen = ICRes.load(p=sample)
                 decoding_start = data_processor.num_events_after+data_processor.num_events_before+2
-                # NOTE: rewrite...
-                # middle_tokens_gen = res_gen.tok[decoding_start:res_gen.decoding_end-1]
                 middle_tokens_gen = res_gen.tok[decoding_start:res_gen.decoding_end-1]
                 s = torch.cat([before, middle_tokens_gen, after], axis=0)
                 gen_midi = sample.parent.joinpath(f'song.mid')
@@ -335,8 +335,20 @@ def plot(c : Config):
                 files = [temp_midi,gen_midi]
                 res = [res_temp, res_gen]
                 figs_pr_sample = 4
-                fig, ax = plt.subplots(len(files) * figs_pr_sample, 1, figsize=(15,9), sharex=True)
-                fig_plotly = make_subplots(rows=len(files) * figs_pr_sample, cols=1, shared_xaxes=True, vertical_spacing=0.02)
+                titles = [title + f" {type_}" for type_ in ['template', 'generated'] for title in (
+                    'Piano roll',
+                    'IC tokens',
+                    'IC Interpolation',
+                    'IC Interpolation summed channels'
+                ) ]
+
+                fig_plotly = make_subplots(
+                    rows=len(files) * figs_pr_sample,
+                    cols=1,
+                    shared_xaxes=True,
+                    vertical_spacing=0.03,
+                    subplot_titles=titles,
+                    )
                 # ic_tok_max = max([r.ic_tok.max() for r in res])
                 ic_int_max = max([r.ic_int.max() for r in res])
                 ic_int_summed_max = max([r.ic_int.sum(-1).max() for r in res])
@@ -348,34 +360,18 @@ def plot(c : Config):
                     sr = 10
                     warn('There are some problems with the velocities which needs to be investigated! Multiple notes with same pitch on same time')
                     piano_roll = midi.get_piano_roll(sr).T
+                    "/share/hel/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Ankunft bei den schwarzen Schwänen, WWV 95, 83pIdDPBQg4.mid"
                     end = piano_roll.shape[0]/sr
-                    legends = dataloader_generator.features
 
                     pitch_range = (24,96)
-                    # pitch_range = (None, None)
-                    ax[i *figs_pr_sample + 0].imshow(
-                        piano_roll.T[slice(*pitch_range)],
-                        origin='lower',
-                        extent=[0, end, *pitch_range],
-                        aspect='auto',
-                        interpolation='none',
-                        cmap='plasma',
-                    )
                     image = px.imshow(
-                        piano_roll.T,
+                        # TODO: find better way to do this which keeps the correct values shown...
+                        np.log10(piano_roll.T + 1e-6),
                         origin="lower",
                         color_continuous_scale="plasma",
                         labels=dict(x="Time", y="Pitch", color="Velocity"),
                         x=np.arange(0, end, 1/sr),
                         )
-                    def express_to_suplot(fig_plotly, explot, row, col):
-                        for trace in explot.data:
-                            trace.showlegend = False
-                            fig_plotly.add_trace(trace, row=row, col=col)
-                    
-                    # fig.update_layout(xaxis=dict(
-
-                    # ))
                     # TODO: this low level time calculation of tokens should not be here.
                     time_before = torch.sum(torch.tensor(
                         [dataloader_generator.dataset.index2value['time_shift'][tok[3].item()] for tok in before]
@@ -386,9 +382,6 @@ def plot(c : Config):
                     time_middle = torch.sum(torch.tensor(
                         [dataloader_generator.dataset.index2value['time_shift'][tok[3].item()] for tok in middle_tokens]
                     ), dim=0).item() + time_before
-                    
-                    # image.add_vline(x=time_before)
-                    # image.add_vline(x=time_middle)
                     express_to_suplot(fig_plotly, image, row=i *figs_pr_sample + 1, col=1)
                     fig_plotly.add_shape(
                         go.layout.Shape(
@@ -400,7 +393,8 @@ def plot(c : Config):
                             x1=time_before,
                             y1=128,),
                         row=i *figs_pr_sample + 1,
-                        col=1)
+                        col=1
+                    )
                     fig_plotly.add_shape(
                         go.layout.Shape(
                             type="line",
@@ -411,26 +405,16 @@ def plot(c : Config):
                             x1=time_middle,
                             y1=128,),
                         row=i *figs_pr_sample + 1,
-                        col=1)
+                        col=1
+                    )
                     fig_plotly.update_yaxes(range=pitch_range, row=i *figs_pr_sample + 1, col=1)  
-                    # ax[i *figs_pr_sample + 0].vlines([time_before,time_middle], *pitch_range, color='r', alpha=0.5)
-                    # fig_plotly.add_shape(type='line', x0=x, y0=0, x1=x, y1=99, line=dict(color='red', width=1))
-
                     n_channels = channels.stop- channels.start
                     unique_timepoints_, cum_ics = unique_timepoints(r.timepoints, r.ic_tok)
                     cum_ics_list.append(cum_ics.max())
                     unique_timepoints_ += time_before
                     n_points = len(unique_timepoints_)
-                    # ax[1].plot(unique_timepoint, cum_ics[:, channel],'.-')
                     c_ = np.broadcast_to(np.array(dataloader_generator.features)[None,:], (n_points, n_channels)).flatten()
                     times = np.broadcast_to(np.array(unique_timepoints_)[:,None], (n_points, n_channels)).flatten()
-                    # scatter = ax[i*figs_pr_sample+1].scatter(
-                    #     times,
-                    #     cum_ics[:, channels].numpy().flatten(),
-                    #     c=c_,
-                    #     s=1.5,
-                    #     marker='.'
-                    # )
                     
                     scatter = px.scatter(
                         x=times,
@@ -441,19 +425,12 @@ def plot(c : Config):
                         # color_continuous_scale="plasma",
                         )
                     express_to_suplot(fig_plotly, scatter, row=i *figs_pr_sample + 2, col=1)
-                    # legend1 = ax[i*figs_pr_sample+1].legend(*scatter.legend_elements(),
-                    #                     loc="lower left", title="Classes")
-                    # ax[i*figs_pr_sample+1].add_artist(legend1)
-
-                    # n_steps = len(r.ic_int)
                     ts = r.timepoints_int + time_before
                     ts_b = np.broadcast_to(ts[:,None], r.ic_int.shape).flatten()
                     colors = np.broadcast_to(np.array(dataloader_generator.features)[None, :], r.ic_int.shape).flatten()
-                    express_to_suplot(fig_plotly, px.line(x=ts_b, y=r.ic_int.flatten(), color=colors, title='Hehe', line_shape='hv'), row=i *figs_pr_sample + 3, col=1)
-                    int_summed_channels = r.ic_int[:, channels].sum(1)
-                    
-                    # ax[i*figs_pr_sample+3].step(ts, int_summed_channels, where='post')
-                    express_to_suplot(fig_plotly, px.line(x=ts, y=r.ic_int.sum(-1), title='Hehe', line_shape='hv'), row=i *figs_pr_sample + 4, col=1)
+                    express_to_suplot(fig_plotly, px.line(x=ts_b, y=r.ic_int.flatten(), color=colors, line_shape='hv'), row=i *figs_pr_sample + 3, col=1)
+                    int_summed_channels = r.ic_int.sum(-1)
+                    express_to_suplot(fig_plotly, px.line(x=ts, y=int_summed_channels, line_shape='hv'), row=i *figs_pr_sample + 4, col=1)
                     
 
                 cum_ics_max = max(cum_ics_list)
@@ -461,11 +438,9 @@ def plot(c : Config):
                     fig_plotly.update_yaxes(range=(0, cum_ics_max+1), row=i *figs_pr_sample + 2, col=1) 
                     fig_plotly.update_yaxes(range=(0, ic_int_max+1), row=i *figs_pr_sample + 3, col=1)
                     fig_plotly.update_yaxes(range=(0, ic_int_summed_max+1), row=i *figs_pr_sample + 4, col=1)
-                # fig.tight_layout()
-                # plt.savefig(sample.parent.joinpath('ic_curve.pdf'))
                 fig_plotly.write_html(sample.parent.joinpath('ic_curve.html'))
             except Exception as e:
-                print(f"Failed with expection {e}")
+                logging.error(f"Failed with expection {e}")
 
 
 if __name__ == "__main__":
@@ -493,5 +468,4 @@ if __name__ == "__main__":
         plot(c)
     else:
         raise ValueError(f"Unknown subcommand {args.subcommand}")
-    # c : Config = CLI(Config, as_positional=False)
 

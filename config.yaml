@@ -15,11 +15,11 @@ app:
       n_inpaint: 256
     # NOTE: range of timepoits
   step: 0.5
-  k_traces: 128
+  k_traces: 4
   weight:
     class_path: CIA.ic.MovingAverage
     init_args:
       window_size: 0.5
       c: 0.
-  samples_per_template: 4
+  samples_per_template: 2
   logging: DEBUG

@@ -890,21 +890,17 @@ class DecoderEventsHandler(Handler):
             weights_per_category = self.model.module.event_state_to_weights(
                 output=output, target_embedded=target_embedded
             )
-            ics = []
             # NOTE: only works for batch_size == 1
-            for w, x_, mask in zip(weights_per_category, x.permute(2,0,1), (~metadata_dict['loss_mask']).permute(2,0,1)):
+            ics = torch.empty_like(x, device='cpu', dtype=torch.float32)
+            for i, (w, x_, mask) in enumerate(zip(weights_per_category, x.permute(2,0,1), (~metadata_dict['loss_mask']).permute(2,0,1))):
                 w = w[mask]
                 x_ = x_[mask]
                 ic = torch.nn.functional.cross_entropy(input=w, target=x_, reduction='none')
                 ic = einops.rearrange(ic, '(b n) -> b n', b=batch_size)
-                ics.append(ic.cpu())
-            ics = torch.stack(ics, dim=-1)
-            # middle_tokens = x[~metadata_dict['loss_mask']].view(batch_size, -1 , self.num_channels_target)
+                ics[..., i][mask] = ic.cpu()
+            # NOTE: again the decoding_end could be problematic if it includes patting?
             middle_slice = slice(metadata_dict['decoding_start'], metadata_dict['decoding_end']-1)
             middle_tokens = x[0, middle_slice]
-            # if match_original_onsets is not None:
-            #     onsets = torch.tensor(np.append(match_original_onsets, match_original_onsets[:, -1:], axis=1))
-            # else:
             # TODO: There's some small deviation between this calculation and the one obtained by simply using the cum
             onsets = torch.cumsum(torch.tensor(
                 [0]+[self.dataloader_generator.dataset.index2value['time_shift'][tok[3].item()] for tok in middle_tokens]

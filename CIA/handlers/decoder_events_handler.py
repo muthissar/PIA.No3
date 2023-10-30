@@ -6,7 +6,7 @@ from warnings import warn
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 # from CIA.ic import gen_interpolate
-from CIA.ic import ICRes, Interpolator, Piece, unique_timepoints
+from CIA.ic import ICCurve, ICRes, Interpolator, Piece, unique_timepoints
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,
@@ -21,6 +21,8 @@ from torch.nn.parallel import DistributedDataParallel
 import torch.distributed as dist
 import einops
 import logging
+# import multiprocessing
+# logger = multiprocessing.get_logger()
 
 # TODO duplicated code with decoder_prefix_handler.py
 class DecoderEventsHandler(Handler):
@@ -543,6 +545,7 @@ class DecoderEventsHandler(Handler):
         k_traces,
         weight_fn,
         piece: Piece,
+        interpolator_template : Optional[torch.FloatTensor] = None,
         temperature=1.0,
         top_p=1.0,
         top_k=0,
@@ -568,17 +571,21 @@ class DecoderEventsHandler(Handler):
         # TODO: deprecate all instances of setting original_sequence
         # metadata_dict['original_sequence'] = x.detach().clone()
         # NOTE: this is only for the middle tokens!
-        timepoints_tok_template, ic_tok_template = self.compute_token_onsets(
-            x=metadata_dict['original_sequence'],
-            metadata_dict=metadata_dict
-        )
-        # warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
-        logging.warning('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
-        interpolator_template = Interpolator(
-            ic_times=[timepoints_tok_template],
-            ics=[ic_tok_template],
-            weight_fn=weight_fn
-        )
+        if interpolator_template is None:
+            timepoints_tok_template, ic_tok_template = self.compute_token_onsets(
+                x=metadata_dict['original_sequence'],
+                metadata_dict=metadata_dict
+                )
+            # warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
+            logging.warning('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
+            interpolator_template = Interpolator(
+                ic_times=[timepoints_tok_template],
+                ics=[ic_tok_template],
+                weight_fn=weight_fn
+            )
+        else:
+            timepoints_tok_template = None
+            ic_tok_template = None
         # just to be sure we erase the tokens to be generated
         # if not regenerate_first_ts:
         #     x[:, decoding_start_event:] = 0
@@ -906,9 +913,6 @@ class DecoderEventsHandler(Handler):
                 [0]+[self.dataloader_generator.dataset.index2value['time_shift'][tok[3].item()] for tok in middle_tokens]
             ), dim=0
             )
-            # cum_shifts = self.dataloader_generator.get_elapsed_time(middle_tokens)
-            # onsets = cum_shifts.roll(1)
-            # onsets[:, 0] = 0
             # TODO: check if this is what we want...
             ics_middle = ics[0, middle_slice]
             unique_timepoint, cum_ics = unique_timepoints(onsets, ics_middle)

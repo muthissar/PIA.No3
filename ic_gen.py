@@ -13,7 +13,7 @@ from CIA.getters import get_handler, get_data_processor, \
     get_sos_embedding
 import time
 import importlib
-from CIA.ic import ICRes, unique_timepoints
+from CIA.ic import ICCurve, ICRes, unique_timepoints
 from CIA.ic import Piece
 # from CIA.ic import get_mov_avg
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
@@ -45,10 +45,15 @@ class Config:
     k_traces : int
     samples_per_template: int
     logging: str
+    ic_curve: Optional[ICCurve]
+    
     # local_rank: Optional[int] = None
     def __post_init__(self):
         # TODO: this does not work in geneal, but to keep it simple for now
+
         args = dict(**self.weight.__dict__, step=self.step, k_traces=self.k_traces)
+        if self.ic_curve is not None:
+            args['ic_curve'] = dataclasses.asdict(self.ic_curve)
         args_str = slugify(str(tuple(sorted(args.items()))))
         self.out = Path(f'out/{args_str}')
         numeric_level = getattr(logging, self.logging.upper(), None)
@@ -273,6 +278,7 @@ def main(c :Config):
                 temperature=1.0,
                 top_p=1.0,
                 top_k=0,
+                interpolator_template=c.ic_curve,
                 num_max_generated_events=num_max_generated_events
             )
             end_time = time.time()
@@ -409,22 +415,24 @@ def plot(c : Config):
                     )
                     fig_plotly.update_yaxes(range=pitch_range, row=i *figs_pr_sample + 1, col=1)  
                     n_channels = channels.stop- channels.start
-                    unique_timepoints_, cum_ics = unique_timepoints(r.timepoints, r.ic_tok)
-                    cum_ics_list.append(cum_ics.max())
-                    unique_timepoints_ += time_before
-                    n_points = len(unique_timepoints_)
-                    c_ = np.broadcast_to(np.array(dataloader_generator.features)[None,:], (n_points, n_channels)).flatten()
-                    times = np.broadcast_to(np.array(unique_timepoints_)[:,None], (n_points, n_channels)).flatten()
-                    
-                    scatter = px.scatter(
-                        x=times,
-                        y=cum_ics[:, channels].numpy().flatten(),
-                        color=c_,
-                        # color_discrete_sequence=['red', 'green', 'blue'],
-                        labels=dict(x="Time", y="IC", color="Channel"),
-                        # color_continuous_scale="plasma",
-                        )
-                    express_to_suplot(fig_plotly, scatter, row=i *figs_pr_sample + 2, col=1)
+                    if r.ic_tok is not None:
+                        # pass
+                        unique_timepoints_, cum_ics = unique_timepoints(r.timepoints, r.ic_tok)
+                        cum_ics_list.append(cum_ics.max())
+                        unique_timepoints_ += time_before
+                        n_points = len(unique_timepoints_)
+                        c_ = np.broadcast_to(np.array(dataloader_generator.features)[None,:], (n_points, n_channels)).flatten()
+                        times = np.broadcast_to(np.array(unique_timepoints_)[:,None], (n_points, n_channels)).flatten()
+                        
+                        scatter = px.scatter(
+                            x=times,
+                            y=cum_ics[:, channels].numpy().flatten(),
+                            color=c_,
+                            # color_discrete_sequence=['red', 'green', 'blue'],
+                            labels=dict(x="Time", y="IC", color="Channel"),
+                            # color_continuous_scale="plasma",
+                            )
+                        express_to_suplot(fig_plotly, scatter, row=i *figs_pr_sample + 2, col=1)
                     ts = r.timepoints_int + time_before
                     ts_b = np.broadcast_to(ts[:,None], r.ic_int.shape).flatten()
                     colors = np.broadcast_to(np.array(dataloader_generator.features)[None, :], r.ic_int.shape).flatten()

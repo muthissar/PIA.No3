@@ -4,22 +4,32 @@ app:
     - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Ankunft bei den schwarzen Schwänen, WWV 95, 83pIdDPBQg4.mid'
       start_node: 0
       n_inpaint: 256
-    - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Bach, Carl Philipp Emanuel, Keyboard Sonata in F major, H.55, zRPTf8eGLWc.mid'
-      start_node: 0
-      n_inpaint: 256
-    - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wieniawski, Józef, Rêverie, Op.45, WaKCcUPl7Io.mid'
-      start_node: 0
-      n_inpaint: 256
-    - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Piano Sonata in B-flat major, WWV 21, kOlm0TGeZHY.mid'
-      start_node: 0
-      n_inpaint: 256
+    # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Bach, Carl Philipp Emanuel, Keyboard Sonata in F major, H.55, zRPTf8eGLWc.mid'
+    #   start_node: 0
+    #   n_inpaint: 256
+    # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wieniawski, Józef, Rêverie, Op.45, WaKCcUPl7Io.mid'
+    #   start_node: 0
+    #   n_inpaint: 256
+    # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Piano Sonata in B-flat major, WWV 21, kOlm0TGeZHY.mid'
+    #   start_node: 0
+    #   n_inpaint: 256
     # NOTE: range of timepoits
   step: 0.5
-  k_traces: 4
+  k_traces: 64
   weight:
     class_path: CIA.ic.MovingAverage
     init_args:
       window_size: 0.5
       c: 0.
-  samples_per_template: 2
+  samples_per_template: 4
+  ic_curve:
+    class_path: CIA.ic.Piecewise
+    init_args:
+      timepoints: [0, 27]
+      ics: [
+        [5, 5, 5, 5],
+        [5, 5, 5, 5],
+        [0, 0, 0, 0],
+      ]
+  
   logging: DEBUG

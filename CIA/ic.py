@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Optional, Type
+from typing import Callable, Iterable, List, Optional, Type
 from typing_extensions import Self
 import einops
 
 import torch
-
+import numpy as np
 
 # def gen_interpolate(
 #         ic_times : Iterable[torch.FloatTensor],
@@ -25,7 +25,30 @@ import torch
 #         return einops.einsum(w, ics, 'bz T tok, bz tok ... -> bz T ...')
 #     return interpolate
 @dataclass
-class Interpolator(Callable[[torch.FloatTensor], torch.FloatTensor]):
+class ICCurve(Callable[[torch.FloatTensor], torch.FloatTensor]):
+    def __call__(self, t : torch.FloatTensor) -> torch.FloatTensor:
+        raise NotImplementedError
+@dataclass
+class Piecewise(ICCurve):
+    timepoints: List[float]
+    ics: List[List[float]]
+    def __post_init__(self):
+        assert len(self.timepoints) == len(self.ics) - 1
+        self._timepoints = np.array(self.timepoints)
+        self._ics = np.array(self.ics)
+    
+    def __call__(self, t : torch.FloatTensor) -> torch.FloatTensor:
+        # Define the conditions for each step
+        t = t.numpy()
+        conditions = [t < self._timepoints[0]]
+        for i in range(len(self._timepoints) - 1):
+            conditions.append((t >= self._timepoints[i]) & (t < self._timepoints[i+1]))
+        conditions.append(t >= self._timepoints[-1])
+        return torch.tensor(np.stack([np.piecewise(t, conditions, self._ics[:,i]) for i in range(self._ics.shape[1])],axis=-1)[None])
+
+
+@dataclass
+class Interpolator(ICCurve):
     ic_times : Iterable[torch.FloatTensor]
     ics: Iterable[torch.FloatTensor]
     weight_fn: Callable[[torch.FloatTensor], torch.FloatTensor]

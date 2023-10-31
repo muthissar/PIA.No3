@@ -1,5 +1,5 @@
 app:
-  label: sawtooth-high
+  label: sawtooth-2
   pieces:
     # /share/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi/PianoMidi-PianoIterator/validation/
     - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
@@ -41,10 +41,12 @@ app:
     class_path: CIA.ic.LinearInterpolation
     init_args:
       # relative timepoints
-      timepoints: [0, 1.]
+      timepoints: [0, .25, .5, 1.]
       ics: [
         [2.5, 2.5, 2.5, 2.5],
-        [10., 10., 10., 10.],
+        [7.5, 7.5, 7.5, 7.5],
+        [2.5, 2.5, 2.5, 2.5],
+        [7.5, 7.5, 7.5, 7.5],
       ]
       # ics: [
       #   [1.25, 1.25, 1.25, 1.25],

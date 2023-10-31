@@ -714,7 +714,7 @@ class DecoderEventsHandler(Handler):
                                         # if interpolation_time_points[timepoint_idx]/interpolation_time_points[-1] >=done_pct:
                                         done[batch_index, channel_index] = True
                                         # NOTE: avoid end token to be written in the middle tokens
-                                        event_indices[batch_indices] =- 1
+                                        event_indices[batch_indices] -= 1
                                         # decoding_end = event_index
                                         logger.info("End of decoding due to END symbol generation")
 

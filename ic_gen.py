@@ -13,8 +13,7 @@ from CIA.getters import get_handler, get_data_processor, \
     get_sos_embedding
 import time
 import importlib
-from CIA.ic import ICCurve, ICRes, unique_timepoints
-from CIA.ic import Piece
+from CIA.ic import ICCurve, ICRes, unique_timepoints, DrawnICCurve, Piece
 # from CIA.ic import get_mov_avg
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
@@ -47,6 +46,7 @@ class Config:
     samples_per_template: int
     logging: str
     ic_curve: Optional[ICCurve]
+    label: Optional[str] = None
     
     # local_rank: Optional[int] = None
     def __post_init__(self):
@@ -55,7 +55,7 @@ class Config:
         args = dict(**self.weight.__dict__, step=self.step, k_traces=self.k_traces)
         if self.ic_curve is not None:
             args['ic_curve'] = dataclasses.asdict(self.ic_curve)
-        args_str = slugify(str(tuple(sorted(args.items()))))
+        args_str = slugify(str(tuple(sorted(args.items())))) if self.label is None else self.label
         self.out = Path(f'out/{args_str}')
         self.out.mkdir(parents=True, exist_ok=True)
         numeric_level = getattr(logging, self.logging.upper(), None)
@@ -218,7 +218,16 @@ def main(c :Config):
             x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=piece.n_inpaint)
             warn("In place changing decoding_end, possible bug")
             metadata_dict['decoding_end'] = min(torch.tensor(orig_seq_length + 3, device=metadata_dict['decoding_end'].device), metadata_dict['decoding_end'])
-            ts = torch.arange(0, metadata_dict['placeholder_duration'].item(), c.step)
+            placeholder_duration = metadata_dict['placeholder_duration'].item()
+            ts = torch.arange(0, placeholder_duration, c.step)
+            # TODO: ugly to check like this. Alternatively we could require that
+            # the times are always relative. However, would be problematic for matching,
+            # since the absolute time differences are important for the scaling.
+            if c.ic_curve is not None:
+                if isinstance(c.ic_curve, DrawnICCurve):
+                    ic_curve : DrawnICCurve = c.ic_curve
+                    ic_curve.set_placeholder_length(placeholder_duration)
+
             # # "open ended"
             # secs_dec = 25.
             # batch_size = 1
@@ -475,6 +484,7 @@ if __name__ == "__main__":
             dir.mkdir(exist_ok=True, parents=True)
             parser.save(args, dir.joinpath('config.yaml'), overwrite=True)
         main(c)
+        plot(c)
 
     elif args.subcommand == "plot":
         plot(c)

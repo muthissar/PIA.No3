@@ -29,21 +29,42 @@ class ICCurve(Callable[[torch.FloatTensor], torch.FloatTensor]):
     def __call__(self, t : torch.FloatTensor) -> torch.FloatTensor:
         raise NotImplementedError
 @dataclass
-class Piecewise(ICCurve):
+class DrawnICCurve(ICCurve):
+    def set_placeholder_length(self, placholder_length : float):
+        self._placeholder_scale = 1 / placholder_length
+    def __post_init__(self):
+        self._placeholder_scale = 1.
+@dataclass
+class LinearInterpolation(DrawnICCurve):
     timepoints: List[float]
     ics: List[List[float]]
     def __post_init__(self):
+        super().__post_init__()
+        assert len(self.timepoints) == len(self.ics)
+        self._timepoints = np.array(self.timepoints)
+        self._ics = np.array(self.ics)
+    def __call__(self, t : torch.FloatTensor) -> torch.FloatTensor:
+        t = (t* self._placeholder_scale).numpy()
+        return torch.tensor(np.stack([np.interp(t, self._timepoints, ics) for ics in self._ics.T], axis=1))[None]
+@dataclass
+class Piecewise(DrawnICCurve):
+    # NOTE alternatively scipy.interpolate.interp1d(x, y, kind='nearest'), but it's deprecated
+    timepoints: List[float]
+    ics: List[List[float]]
+    # time_relative: bool = False
+    def __post_init__(self):
+        super().__post_init__()
         assert len(self.timepoints) == len(self.ics) - 1
         self._timepoints = np.array(self.timepoints)
         self._ics = np.array(self.ics)
-    
     def __call__(self, t : torch.FloatTensor) -> torch.FloatTensor:
         # Define the conditions for each step
-        t = t.numpy()
-        conditions = [t < self._timepoints[0]]
-        for i in range(len(self._timepoints) - 1):
-            conditions.append((t >= self._timepoints[i]) & (t < self._timepoints[i+1]))
-        conditions.append(t >= self._timepoints[-1])
+        t = (t* self._placeholder_scale).numpy()
+        timepoints = self._timepoints
+        conditions = [t < timepoints[0]]
+        for i in range(len(timepoints) - 1):
+            conditions.append((t >= timepoints[i]) & (t < timepoints[i+1]))
+        conditions.append(t >= timepoints[-1])
         return torch.tensor(np.stack([np.piecewise(t, conditions, self._ics[:,i]) for i in range(self._ics.shape[1])],axis=-1)[None])
 
 

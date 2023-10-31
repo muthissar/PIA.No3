@@ -709,10 +709,12 @@ class DecoderEventsHandler(Handler):
                                         # logger.warn('Find out if end can happen accross different channels?')
                                         # NOTE if a sequence is done, we keep it's interpolation and continue
                                         # computing the rest of the timepoints
-                                        done_pct = 0.8
+                                        # done_pct = 0.8
                                         # NOTE: this is 
                                         # if interpolation_time_points[timepoint_idx]/interpolation_time_points[-1] >=done_pct:
                                         done[batch_index, channel_index] = True
+                                        # NOTE: avoid end token to be written in the middle tokens
+                                        event_indices[batch_indices] =- 1
                                         # decoding_end = event_index
                                         logger.info("End of decoding due to END symbol generation")
 

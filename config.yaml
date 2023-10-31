@@ -1,9 +1,11 @@
 app:
+  label: sawtooth-high
   pieces:
     # /share/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi/PianoMidi-PianoIterator/validation/
     - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
       start_node: 0
       n_inpaint: 256
+
     # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Ankunft bei den schwarzen Schwänen, WWV 95, 83pIdDPBQg4.mid'
     #   start_node: 0
     #   n_inpaint: 256
@@ -25,14 +27,28 @@ app:
       window_size: 0.5
       c: 0.
   samples_per_template: 4
+  # ic_curve:
+  #   class_path: CIA.ic.Piecewise
+  #   init_args:
+  #     # relative timepoints
+  #     timepoints: [0, .5]
+  #     ics: [
+  #       [5, 5, 5, 5],
+  #       [5, 5, 5, 5],
+  #       [0, 0, 0, 0],
+  #     ]
   ic_curve:
-    class_path: CIA.ic.Piecewise
+    class_path: CIA.ic.LinearInterpolation
     init_args:
-      timepoints: [0, 15.3]
+      # relative timepoints
+      timepoints: [0, 1.]
       ics: [
-        [5, 5, 5, 5],
-        [5, 5, 5, 5],
-        [0, 0, 0, 0],
+        [2.5, 2.5, 2.5, 2.5],
+        [10., 10., 10., 10.],
       ]
-  
+      # ics: [
+      #   [1.25, 1.25, 1.25, 1.25],
+      #   [5., 5., 5., 5.],
+      # ]
+    
   logging: DEBUG

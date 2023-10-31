@@ -130,4 +130,7 @@ def unique_timepoints(onsets : torch.Tensor, ics : torch.Tensor):
     unique_timepoint = torch.tensor(unique_timepoint)
     cum_ics = torch.stack(cum_ics, dim=0)
     return unique_timepoint, cum_ics
+def numerial_stable_softmax_entr(logits, dim=-1):
+    p = torch.nn.functional.softmax(logits, dim=dim)
+    return -(p * torch.nn.functional.log_softmax(logits, dim=dim))
 

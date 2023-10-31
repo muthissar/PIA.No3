@@ -6,7 +6,7 @@ from warnings import warn
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 # from CIA.ic import gen_interpolate
-from CIA.ic import ICCurve, ICRes, Interpolator, Piece, unique_timepoints
+from CIA.ic import ICCurve, ICRes, Interpolator, Piece, unique_timepoints, numerial_stable_softmax_entr
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,
@@ -572,7 +572,7 @@ class DecoderEventsHandler(Handler):
         # metadata_dict['original_sequence'] = x.detach().clone()
         # NOTE: this is only for the middle tokens!
         if interpolator_template is None:
-            timepoints_tok_template, ic_tok_template = self.compute_token_onsets(
+            timepoints_tok_template, ic_tok_template, entr = self.compute_token_onsets(
                 x=metadata_dict['original_sequence'],
                 metadata_dict=metadata_dict
                 )
@@ -875,7 +875,7 @@ class DecoderEventsHandler(Handler):
     ):
         
 
-        unique_timepoint, cum_ics = self.compute_token_onsets(x, metadata_dict)
+        unique_timepoint, cum_ics, entr = self.compute_token_onsets(x, metadata_dict)
         integrator = functools.partial(self.integration, unique_timepoint=unique_timepoint, cum_ics=cum_ics)
         return integrator
         
@@ -903,23 +903,31 @@ class DecoderEventsHandler(Handler):
             )
             # NOTE: only works for batch_size == 1
             ics = torch.empty_like(x, device='cpu', dtype=torch.float32)
+            entrs = torch.empty_like(x, device='cpu', dtype=torch.float32)
             for i, (w, x_, mask) in enumerate(zip(weights_per_category, x.permute(2,0,1), (~metadata_dict['loss_mask']).permute(2,0,1))):
                 w = w[mask]
                 x_ = x_[mask]
                 ic = torch.nn.functional.cross_entropy(input=w, target=x_, reduction='none')
                 ic = einops.rearrange(ic, '(b n) -> b n', b=batch_size)
                 ics[..., i][mask] = ic.cpu()
+                entr = numerial_stable_softmax_entr(w,dim=-1).sum(dim=-1)
+                entrs[..., i][mask] = entr.cpu()
+                
             # NOTE: again the decoding_end could be problematic if it includes patting?
             middle_slice = slice(metadata_dict['decoding_start'], metadata_dict['decoding_end']-1)
             middle_tokens = x[0, middle_slice]
             # TODO: There's some small deviation between this calculation and the one obtained by simply using the cum
             onsets = torch.cumsum(torch.tensor(
                 [0]+[self.dataloader_generator.dataset.index2value['time_shift'][tok[3].item()] for tok in middle_tokens]
-            ), dim=0
+                , dtype=torch.float32), dim=0
             )
             # TODO: check if this is what we want...
             ics_middle = ics[0, middle_slice]
-            unique_timepoint, cum_ics = unique_timepoints(onsets, ics_middle)
-            
+            entrs_middle = entrs[0, middle_slice]
+            # NOTE: it seems uneccesary to compute unique timepoints, rather we can simply 
+
+
+            # unique_timepoint, cum_ics = unique_timepoints(onsets, ics_middle)
+            onsets = onsets[:-1]
             # TODO: remove batches everywhere because it's not working anyway
-            return unique_timepoint, cum_ics
+            return onsets, ics_middle, entrs_middle

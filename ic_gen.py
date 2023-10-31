@@ -374,7 +374,8 @@ def plot(c : Config):
 
                 for i, (f, r) in enumerate(zip(files, res)):
                     midi = pretty_midi.PrettyMIDI(str(f))
-                    sr = 10
+                    # sr = 10
+                    sr = 50 # 1 / .02, where 0.2 is the smallest time-shift
                     warn('There are some problems with the velocities which needs to be investigated! Multiple notes with same pitch on same time')
                     piano_roll = midi.get_piano_roll(sr).T
                     "/share/hel/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Ankunft bei den schwarzen Schwänen, WWV 95, 83pIdDPBQg4.mid"
@@ -484,7 +485,11 @@ if __name__ == "__main__":
             dir.mkdir(exist_ok=True, parents=True)
             parser.save(args, dir.joinpath('config.yaml'), overwrite=True)
         main(c)
-        plot(c)
+        # NOTE: allow the processes to finish before plotting
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
+        if 'RANK' not in os.environ or int(os.environ['RANK']) == 0 :    
+            plot(c)
 
     elif args.subcommand == "plot":
         plot(c)

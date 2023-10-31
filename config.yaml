@@ -1,9 +1,12 @@
 app:
   pieces:
     # /share/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi/PianoMidi-PianoIterator/validation/
-    - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Ankunft bei den schwarzen Schwänen, WWV 95, 83pIdDPBQg4.mid'
+    - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
       start_node: 0
       n_inpaint: 256
+    # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Ankunft bei den schwarzen Schwänen, WWV 95, 83pIdDPBQg4.mid'
+    #   start_node: 0
+    #   n_inpaint: 256
     # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Bach, Carl Philipp Emanuel, Keyboard Sonata in F major, H.55, zRPTf8eGLWc.mid'
     #   start_node: 0
     #   n_inpaint: 256
@@ -25,7 +28,7 @@ app:
   ic_curve:
     class_path: CIA.ic.Piecewise
     init_args:
-      timepoints: [0, 27]
+      timepoints: [0, 15.3]
       ics: [
         [5, 5, 5, 5],
         [5, 5, 5, 5],

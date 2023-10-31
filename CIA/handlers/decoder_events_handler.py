@@ -20,9 +20,9 @@ import numpy as np
 from torch.nn.parallel import DistributedDataParallel
 import torch.distributed as dist
 import einops
-import logging
-# import multiprocessing
-# logger = multiprocessing.get_logger()
+# import logging
+import multiprocessing
+logger = multiprocessing.get_logger()
 
 # TODO duplicated code with decoder_prefix_handler.py
 class DecoderEventsHandler(Handler):
@@ -554,7 +554,7 @@ class DecoderEventsHandler(Handler):
     ):
         # TODO add arguments to preprocess
         # print(f'Placeholder duration: {metadata_dict["placeholder_duration"]}')
-        logging.debug(f'Placeholder duration: {metadata_dict["placeholder_duration"]}')
+        logger.debug(f'Placeholder duration: {metadata_dict["placeholder_duration"]}')
         self.eval()
         batch_size, num_events, n_feats = x.size()
         # TODO only works with batch_size=1 at present
@@ -577,7 +577,7 @@ class DecoderEventsHandler(Handler):
                 metadata_dict=metadata_dict
                 )
             # warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
-            logging.warning('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
+            logger.warning('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
             interpolator_template = Interpolator(
                 ic_times=[timepoints_tok_template],
                 ics=[ic_tok_template],
@@ -594,7 +594,7 @@ class DecoderEventsHandler(Handler):
         #     x[:, decoding_start_event + 1 :] = 0
         #     x[:, decoding_start_event, -1] = 0
         # warn('It does not make sense to limit the number of tokens that we can resample.')
-        logging.warning('It does not make sense to limit the number of tokens that we can resample.')
+        logger.warning('It does not make sense to limit the number of tokens that we can resample.')
         if num_max_generated_events is not None:
             num_events = min(
                 decoding_start_event + num_max_generated_events, num_events
@@ -706,14 +706,15 @@ class DecoderEventsHandler(Handler):
                                     # TODO: move all termination checks together, for better readability.
                                     if end_symbol_index == int(new_pitch_index):
                                         # warn('Find out if end can happen accross different channels?')
-                                        logging.warn('Find out if end can happen accross different channels?')
+                                        # logger.warn('Find out if end can happen accross different channels?')
                                         # NOTE if a sequence is done, we keep it's interpolation and continue
                                         # computing the rest of the timepoints
                                         done_pct = 0.8
-                                        if interpolation_time_points[timepoint_idx]/interpolation_time_points[-1] >=done_pct:
-                                            done[batch_index, channel_index] = True
-                                            # decoding_end = event_index
-                                            print("End of decoding due to END symbol generation")
+                                        # NOTE: this is 
+                                        # if interpolation_time_points[timepoint_idx]/interpolation_time_points[-1] >=done_pct:
+                                        done[batch_index, channel_index] = True
+                                        # decoding_end = event_index
+                                        logger.info("End of decoding due to END symbol generation")
 
                                     # Additional check:
                                     # if the generated duration is > than the
@@ -730,7 +731,7 @@ class DecoderEventsHandler(Handler):
                                             # print(
                                             #     f"Missing: {generated_duration[batch_index, event_index] - placeholder_duration}"
                                             # )
-                                            logging.debug(f"End of decoding due to reaching last sequence index.\nMissing: {generated_duration[batch_index, event_index] - placeholder_duration}")
+                                            logger.debug(f"End of decoding due to reaching last sequence index.\nMissing: {generated_duration[batch_index, event_index] - placeholder_duration}")
                                             done[batch_index, channel_index] = True
                                         elif generated_duration[batch_index, event_index] > placeholder_duration:
                                             # raise NotImplementedError
@@ -741,7 +742,7 @@ class DecoderEventsHandler(Handler):
                                             # print(
                                             #     f"Excess: {generated_duration[batch_index, event_index] - placeholder_duration}"
                                             # )
-                                            logging.debug('End of decoding due to the generation > than placeholder duration.\nExcess: {generated_duration[batch_index, event_index] - placeholder_duration}')
+                                            logger.debug('End of decoding due to the generation > than placeholder duration.\nExcess: {generated_duration[batch_index, event_index] - placeholder_duration}')
                                             done[batch_index, channel_index] = True
                                         elif generated_duration[batch_index, event_index] < interpolation_time_points[timepoint_idx]:
                                             unexceeded_timepoint.append(batch_index)
@@ -791,7 +792,8 @@ class DecoderEventsHandler(Handler):
                     # ics[first_index] = ics[min_id]
                     first_time_expand = True
                     # warn("while do until it's above the threshold")
-                    logging.warning("while do until it's above the threshold")
+                    # TODO: we could do something like rejection sampling, or use some heuristic search.
+                    # logger.warning("while do until it's above the threshold")
                     timepoint_idx += 1
                     # NOTE: for some reason as soon as we get to here, it starts to be slow.
                     # its likely to be caused by cache misses.

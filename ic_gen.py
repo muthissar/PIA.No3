@@ -188,12 +188,17 @@ def main(c :Config):
     # pieces = [c.pieces[i] for i in range(rank, len(c.pieces), world_size)]
     for piece in tqdm.tqdm(c.pieces, desc='Pieces completed', disable=rank != 0, position=0):
         piece_name = Path(piece.path).stem
-        piece_folder = c.out.joinpath(piece_name)
+        piece_folder = c.out.joinpath(piece_name, f'start_{piece.start_node}_nodes_{piece.n_inpaint}')
+        # piece_folder = c.out.joinpath(piece_name)
         piece_folder.mkdir(exist_ok=True, parents=True)
         # NOTE: parallelize over number of samples per piece
         ds : PianoMidiDataset = dataloader_generator.dataset
         sequence = ds.process_score(piece.path)
         orig_seq_length = len(sequence['pitch'])
+        if piece.start_node > 0:
+            sequence = {k : v[piece.start_node:] for k,v in sequence.items()}
+        if piece.start_node < 0:
+            raise NotImplementedError('Tetst that indeed it works')
         sequence = ds.add_start_end_symbols(
             sequence, start_time=piece.start_node, sequence_size=ds.sequence_size
         )
@@ -325,7 +330,7 @@ def plot(c : Config):
         data_processor_type=config["data_processor_type"],
         data_processor_kwargs=config["data_processor_kwargs"],
     )
-    for temp_file in [f for f in c.out.glob('*/temp/ic.pt')]:
+    for temp_file in [f for f in c.out.rglob('*/temp/ic.pt')]:
         song_dir = temp_file.parent.parent
         res_temp = ICRes.load(p=temp_file)
         num_middle_tokens = res_temp.decoding_end-1 - (data_processor.num_events_after+data_processor.num_events_before+2)
@@ -351,9 +356,10 @@ def plot(c : Config):
 
                 files = [temp_midi,gen_midi]
                 res = [res_temp, res_gen]
-                figs_pr_sample = 4
+                figs_pr_sample = 5
                 titles = [title + f" {type_}" for type_ in ['template', 'generated'] for title in (
                     'Piano roll',
+                    'Entr tokens',
                     'IC tokens',
                     'IC Interpolation',
                     'IC Interpolation summed channels'
@@ -370,6 +376,7 @@ def plot(c : Config):
                 ic_int_max = max([r.ic_int.max() for r in res])
                 ic_int_summed_max = max([r.ic_int.sum(-1).max() for r in res])
                 cum_ics_list = []
+                entrs_list = []
                 
 
                 for i, (f, r) in enumerate(zip(files, res)):
@@ -429,36 +436,48 @@ def plot(c : Config):
                     fig_plotly.update_yaxes(range=pitch_range, row=i *figs_pr_sample + 1, col=1)  
                     n_channels = channels.stop- channels.start
                     if r.ic_tok is not None:
-                        # pass
-                        unique_timepoints_, cum_ics = unique_timepoints(r.timepoints, r.ic_tok)
-                        cum_ics_list.append(cum_ics.max())
-                        unique_timepoints_ += time_before
-                        n_points = len(unique_timepoints_)
+                        n_points = len(r.timepoints)
                         c_ = np.broadcast_to(np.array(dataloader_generator.features)[None,:], (n_points, n_channels)).flatten()
-                        times = np.broadcast_to(np.array(unique_timepoints_)[:,None], (n_points, n_channels)).flatten()
-                        
+                        times = np.broadcast_to(np.array(r.timepoints + time_before )[:,None], (n_points, n_channels)).flatten()
+                        # times = r.timepoints + time_before 
+                        entrs_list.append(r.entr_tok.max())                 
                         scatter = px.scatter(
                             x=times,
-                            y=cum_ics[:, channels].numpy().flatten(),
+                            y=r.entr_tok[:, channels].numpy().flatten(),
+                            color=c_,
+                            # color_discrete_sequence=['red', 'green', 'blue'],
+                            labels=dict(x="Time", y="Entropy", color="Channel"),
+                            # color_continuous_scale="plasma",
+                            )
+                        express_to_suplot(fig_plotly, scatter, row=i *figs_pr_sample + 2, col=1)                        # pass
+                        # unique_timepoints_, cum_ics = unique_timepoints(r.timepoints, r.ic_tok)
+                        # unique_timepoints_, cum_ics = r.timepoints, r.ic_tok
+                        cum_ics_list.append(r.ic_tok.max())
+                        # unique_timepoints_ += time_before                     
+                        scatter = px.scatter(
+                            x=times,
+                            y=r.ic_tok[:, channels].numpy().flatten(),
                             color=c_,
                             # color_discrete_sequence=['red', 'green', 'blue'],
                             labels=dict(x="Time", y="IC", color="Channel"),
                             # color_continuous_scale="plasma",
                             )
-                        express_to_suplot(fig_plotly, scatter, row=i *figs_pr_sample + 2, col=1)
+                        express_to_suplot(fig_plotly, scatter, row=i *figs_pr_sample + 3, col=1)
                     ts = r.timepoints_int + time_before
                     ts_b = np.broadcast_to(ts[:,None], r.ic_int.shape).flatten()
                     colors = np.broadcast_to(np.array(dataloader_generator.features)[None, :], r.ic_int.shape).flatten()
-                    express_to_suplot(fig_plotly, px.line(x=ts_b, y=r.ic_int.flatten(), color=colors, line_shape='hv', labels=dict(x="Time", y="IC", color="Channel")), row=i *figs_pr_sample + 3, col=1)
+                    express_to_suplot(fig_plotly, px.line(x=ts_b, y=r.ic_int.flatten(), color=colors, line_shape='hv', labels=dict(x="Time", y="IC", color="Channel")), row=i *figs_pr_sample + 4, col=1)
                     int_summed_channels = r.ic_int.sum(-1)
-                    express_to_suplot(fig_plotly, px.line(x=ts, y=int_summed_channels, line_shape='hv', labels=dict(x="Time", y="IC", color="Channel")), row=i *figs_pr_sample + 4, col=1)
+                    express_to_suplot(fig_plotly, px.line(x=ts, y=int_summed_channels, line_shape='hv', labels=dict(x="Time", y="IC", color="Channel")), row=i *figs_pr_sample + 5, col=1)
                     
 
                 cum_ics_max = max(cum_ics_list)
+                entrs_max = max(entrs_list)
                 for i in range(2):
-                    fig_plotly.update_yaxes(range=(0, cum_ics_max+1), row=i *figs_pr_sample + 2, col=1) 
-                    fig_plotly.update_yaxes(range=(0, ic_int_max+1), row=i *figs_pr_sample + 3, col=1)
-                    fig_plotly.update_yaxes(range=(0, ic_int_summed_max+1), row=i *figs_pr_sample + 4, col=1)
+                    fig_plotly.update_yaxes(range=(0, entrs_max+1), row=i *figs_pr_sample + 2, col=1) 
+                    fig_plotly.update_yaxes(range=(0, cum_ics_max+1), row=i *figs_pr_sample + 3, col=1) 
+                    fig_plotly.update_yaxes(range=(0, ic_int_max+1), row=i *figs_pr_sample + 4, col=1)
+                    fig_plotly.update_yaxes(range=(0, ic_int_summed_max+1), row=i *figs_pr_sample + 5, col=1)
                 fig_plotly.write_html(sample.parent.joinpath('ic_curve.html'))
             # except Exception as e:
             #     logger = multiprocessing.get_logger()

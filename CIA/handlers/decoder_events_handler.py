@@ -572,7 +572,7 @@ class DecoderEventsHandler(Handler):
         # metadata_dict['original_sequence'] = x.detach().clone()
         # NOTE: this is only for the middle tokens!
         if interpolator_template is None:
-            timepoints_tok_template, ic_tok_template, entr = self.compute_token_onsets(
+            timepoints_tok_template, ic_tok_template, entr_template = self.compute_token_onsets(
                 x=metadata_dict['original_sequence'],
                 metadata_dict=metadata_dict
                 )
@@ -604,6 +604,7 @@ class DecoderEventsHandler(Handler):
         event_indices = torch.tensor(k_traces*[decoding_start_event])
         x = einops.repeat(x, '1 ... -> k ...', k=k_traces).contiguous()
         ics = torch.zeros_like(x, dtype=torch.float32,device='cpu')
+        entrs = torch.zeros_like(x, dtype=torch.float32,device='cpu')
         done = torch.zeros((k_traces, n_feats), dtype=torch.bool, device='cpu')
         # warn('Next two lines only for debugging purposes...')
         # batch_indices = torch.tensor([0,0])
@@ -626,6 +627,7 @@ class DecoderEventsHandler(Handler):
                         generated_duration[not_done] = generated_duration[best_index]
                         x[not_done] = x[best_index]
                         ics[not_done] = ics[best_index]
+                        entrs[not_done] = entrs[best_index]
                         first_time_expand = False
                         # print(f"expand time: {time.time()-start_time}")
                     while len(batch_indices) > 0:
@@ -684,7 +686,7 @@ class DecoderEventsHandler(Handler):
                             # Sample from the filtered distribution
                             p = to_numpy(torch.softmax(filtered_logits, dim=-1))
                             # update generated sequence
-                            for p_, batch_index, event_index in zip(p, batch_indices,  event_indices[batch_indices]):
+                            for p_, batch_index, event_index, logits_ in zip(p, batch_indices,  event_indices[batch_indices], filtered_logits):
                                 # TODO: this check seems to be allways true, since we start with event_index == decoding_start_event
                                 if event_index >= decoding_start_event:
                                     new_pitch_index = np.random.choice(
@@ -697,6 +699,7 @@ class DecoderEventsHandler(Handler):
                                         new_pitch_index
                                     )
                                     ics[batch_index, event_index, channel_index] = p_[new_pitch_index].tolist()
+                                    entrs[batch_index, event_index, channel_index] = numerial_stable_softmax_entr(logits_, dim=-1).sum(dim=-1)
 
                                     end_symbol_index = (
                                         self.dataloader_generator.dataset.value2index[
@@ -815,6 +818,7 @@ class DecoderEventsHandler(Handler):
         temp = ICRes(
             tok = original_sequence[0],
             ic_tok = ic_tok_template,
+            entr_tok = entr_template,
             timepoints = timepoints_tok_template,
             ic_int = interpolator_template(interpolation_time_points)[0],
             timepoints_int = interpolation_time_points,
@@ -822,10 +826,12 @@ class DecoderEventsHandler(Handler):
             piece = piece
         )
         ic_tok_gen = ics[best_index,decoding_start_event:decoding_end-1].cpu()
+        entr_gen = entrs[best_index,decoding_start_event:decoding_end-1].cpu()
         gen = ICRes(
             tok = x[best_index_all].cpu(),
             # ics[best_index].cpu(),
             ic_tok = ic_tok_gen,
+            entr_tok = entr_gen,
             timepoints = ic_times_list[best_index_all],
             ic_int = interpolator(interpolation_time_points)[best_index_all],
             timepoints_int = interpolation_time_points,

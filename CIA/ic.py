@@ -107,6 +107,7 @@ class Piece:
 class ICRes:
     tok: torch.Tensor
     ic_tok: torch.Tensor
+    entr_tok: torch.Tensor
     timepoints: torch.Tensor
     ic_int: torch.Tensor
     timepoints_int: torch.Tensor

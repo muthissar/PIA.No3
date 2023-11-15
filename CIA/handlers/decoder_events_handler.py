@@ -698,7 +698,8 @@ class DecoderEventsHandler(Handler):
                                     x[batch_index, event_index, channel_index] = int(
                                         new_pitch_index
                                     )
-                                    ics[batch_index, event_index, channel_index] = p_[new_pitch_index].tolist()
+                                    # ics[batch_index, event_index, channel_index] = p_[new_pitch_index].tolist()
+                                    ics[batch_index, event_index, channel_index] = (-np.log(p_[new_pitch_index])).tolist()
                                     entrs[batch_index, event_index, channel_index] = numerial_stable_softmax_entr(logits_, dim=-1).sum(dim=-1)
 
                                     end_symbol_index = (

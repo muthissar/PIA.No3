@@ -382,7 +382,7 @@ def plot(c : Config):
                 for i, (f, r) in enumerate(zip(files, res)):
                     midi = pretty_midi.PrettyMIDI(str(f))
                     # sr = 10
-                    sr = 50 # 1 / .02, where 0.2 is the smallest time-shift
+                    sr = 150 # 2 / .02, where 0.02 is the smallest time-shift
                     warn('There are some problems with the velocities which needs to be investigated! Multiple notes with same pitch on same time')
                     piano_roll = midi.get_piano_roll(sr).T
                     "/share/hel/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Ankunft bei den schwarzen Schwänen, WWV 95, 83pIdDPBQg4.mid"

@@ -7,6 +7,7 @@ import torch
 import os
 
 import tqdm
+from CIA.dataloaders.dataloader import DataloaderGenerator
 from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
 from CIA.getters import get_handler, get_data_processor, \
     get_dataloader_generator, get_decoder, get_positional_embedding,\
@@ -36,39 +37,98 @@ import plotly.express as px
 model_dir = 'models/piano_event_performer_2021-10-01_16:03:06'
     # before_nodes: int
     # after_nodes: int
+
+@dataclasses.dataclass
+class Data(Iterable[Tuple[torch.LongTensor, str, int, Optional[Piece]]]):
+    label: str
+    @property
+    def dataloader_generator(self) -> DataloaderGenerator:
+        return self.dataloader_generator_
+    @dataloader_generator.setter
+    def dataloader_generator(self, val) -> None:
+        self.dataloader_generator_ = val
+    def __len__(self) -> int:
+        raise NotImplementedError
+    def __iter__(self):
+        raise NotImplementedError
+
+
+@dataclasses.dataclass
+class DataCache(Data):
+    # dataloader_generator : DataloaderGenerator
+    n_inpaint : int
+    n_pieces: Optional[int] = None
+    def __post_init__(self):
+        assert self.label in ['train', 'validation', 'test']
+        assert self.label  != 'test',   'There\'s some problem with the test set' 
+        assert self.n_inpaint < 512 - 5
+    @Data.dataloader_generator.setter
+    def dataloader_generator(self, val) -> None:
+        # super().dataloader_generator.fset(self, val)
+        # super(DataCache, self).dataloader_generator.fset(self, val)
+        self.dataloader_generator_ = val
+        ret = self.dataloader_generator.dataloaders(batch_size = 1)
+        val.dataset.split = self.label 
+        dl_idx = {
+            'train': 0,
+            'validation': 1,
+            'test': 2
+        }[self.label]
+        self.dataloader = ret[dl_idx]
+    def __iter__(self):
+        for i, original_x in enumerate(self.dataloader):
+            if i == self.n_pieces:
+                raise StopIteration
+            piece_name = str(i)
+            piece = None
+            yield original_x['x'], piece_name, self.n_inpaint, piece
+    def __len__(self) -> int:
+        return len(self.dataloader_generator.dataset) if self.n_pieces is None else self.n_pieces
+        
+@dataclasses.dataclass
+class DataPiece(Data):
+    pieces : Iterable[Piece]
+    def __len__(self) -> int:
+        return len(self.pieces)
+    def __repr__(self) -> str:
+        return f'DataPiece({self.label})'
+    def __iter__(self):
+        for piece in self.pieces:
+            piece_name = Path(piece.path).stem + f'_start_{piece.start_node}_nodes_{piece.n_inpaint}'
+            # NOTE: parallelize over number of samples per piece
+            ds : PianoMidiDataset = self.dataloader_generator.dataset
+            sequence = ds.process_score(piece.path)
+            orig_seq_length = len(sequence['pitch'])
+            if piece.start_node > 0:
+                sequence = {k : v[piece.start_node:] for k,v in sequence.items()}
+            if piece.start_node < 0:
+                raise NotImplementedError('Tetst that indeed it works')
+            sequence = ds.add_start_end_symbols(
+                sequence, start_time=piece.start_node, sequence_size=ds.sequence_size
+            )
+            # Tokenize
+            sample = ds.tokenize(sequence)
+            x = torch.tensor([sample[e] for e in self.dataloader_generator.features])
+            original_x = einops.rearrange(x, 'f n -> 1 n f')
+            yield original_x, piece_name, piece.n_inpaint, piece
+        raise StopIteration
+
 @dataclasses.dataclass
 class Experiment:
     time_points_generator: TimepointsGenerator
     weight : Weight
+    dataset : Data
     ic_curve: Optional[ICCurve]
     # NOTE: here we should have either the test set, or some named collection of pieces....
 @dataclasses.dataclass
 class Config:
-    pieces : Iterable[Piece]
-    # the time points defined here(simplified here as step) is piece dependent. For instance it uses the placeholder (for fixed grid,) or uses  
-    # the onesets of the note. Ergo, we need a generator which given a piece generates the time points.
-    # step : float
-    # time_points_generator : TimepointsGenerator
-    # weight : Weight
     k_traces : int
     samples_per_template: int
     logging: str
-    # NOTE: IC-curve + step defines a metric that we can use to compare experiments
-    # ic_curve: Optional[ICCurve]
     experiment: Experiment
-    label: Optional[str] = None
-    
-    # local_rank: Optional[int] = None
     def __post_init__(self):
-        # TODO: this does not work in geneal, but to keep it simple for now
-
-        # args = dict(weight=str(self.weight), time_points_generator=str(self.time_points_generator), k_traces=self.k_traces)
-        # args_exp = dict(experiment=str(self.experiment), k_traces=self.k_traces)
-        # args_settings = dict(k_traces=self.k_traces)
-        # if self.ic_curve is not None:
-        #     args['ic_curve'] = dataclasses.asdict(self.ic_curve)
-        # args_str = slugify(str(tuple(sorted(args_exp.items())))) + '/' + slugify(str(tu)) if self.label is None else self.label
-        args_str =  f'{slugify(str(self.experiment))}/k-traces-{str(self.k_traces)}' if self.label is None else self.label
+        # TODO: exp uniquely identifies where
+        args_str =  f'{slugify(str(self.experiment))}/k-traces-{str(self.k_traces)}'
         self.out = Path(f'out/{args_str}')
         self.out.mkdir(parents=True, exist_ok=True)
         numeric_level = getattr(logging, self.logging.upper(), None)
@@ -76,11 +136,6 @@ class Config:
             raise ValueError('Invalid log level: %s' % self.logging)
         log_file = self.out.joinpath('log.txt')
         logging.basicConfig(filename=log_file, level=numeric_level)
-        # NOTE: interpret as range
-        # if isinstance(self.step, Tuple) and len(self.step) == 3:
-        #     self.step = torch.arange(*self.step)
-        # else:
-        #     raise ValueError(f"ts must be tuple, got {type(self.step)}")
 
 
 def main(c :Config):
@@ -198,46 +253,16 @@ def main(c :Config):
     if hasattr(decoder_handler.model.module.transformer, "fix_projection_matrices_"):
         decoder_handler.model.module.transformer.fix_projection_matrices_()
     # NOTE: parallelize over the pieces 
-    # pieces = [c.pieces[i] for i in range(rank, len(c.pieces), world_size)]
-    for piece in tqdm.tqdm(c.pieces, desc='Pieces completed', disable=rank != 0, position=0):
-        piece_name = Path(piece.path).stem
-        piece_folder = c.out.joinpath(piece_name, f'start_{piece.start_node}_nodes_{piece.n_inpaint}')
-        # piece_folder = c.out.joinpath(piece_name)
+    # for piece in tqdm.tqdm(c.pieces, desc='Pieces completed', disable=rank != 0, position=0):
+    # TODO: this is quite ugly, but how can it be done prettyer using jsonargparse?
+    c.experiment.dataset.dataloader_generator = dataloader_generator
+    for original_x, piece_name, n_inpaint, piece in tqdm.tqdm(c.experiment.dataset, desc='Pieces completed', disable=rank != 0, position=0):
+        piece_folder = c.out.joinpath(piece_name)
         piece_folder.mkdir(exist_ok=True, parents=True)
-        # NOTE: parallelize over number of samples per piece
-        ds : PianoMidiDataset = dataloader_generator.dataset
-        sequence = ds.process_score(piece.path)
-        orig_seq_length = len(sequence['pitch'])
-        if piece.start_node > 0:
-            sequence = {k : v[piece.start_node:] for k,v in sequence.items()}
-        if piece.start_node < 0:
-            raise NotImplementedError('Tetst that indeed it works')
-        sequence = ds.add_start_end_symbols(
-            sequence, start_time=piece.start_node, sequence_size=ds.sequence_size
-        )
-        # Tokenize
-        sample = ds.tokenize(sequence)
-        x = torch.tensor([sample[e] for e in dataloader_generator.features])
-        original_x = einops.rearrange(x, 'f n -> 1 n f')
+        
         for i in tqdm.tqdm(np.arange(rank, c.samples_per_template, world_size), desc='sample pr piece', disable=rank != 0, position=1):
-            # dataloader_generator.dataset.split = split
-            # data = dataloader_generator.dataset[id_]
-            # original_x = torch.stack([data[e] for e in dataloader_generator.features], dim=-1)[None]
-            # NOTE: num_events_middle likely the number of notes which will be created? Actually more events are created...
-            # NOTE: first event is always the same, probably because it's a special start token, .
-            # NOTE: Num events, most likely, defines the event (after decode start) that should be how long time (in the original score) we should we should generate. 
-            # TODO: what's the difference between num_events_middle and num_max_generated_events? Probably 
-            # Only needed for setting up start_decode and end_decode.
-            # Does the model actually actually not attend to the after (future) tokens while decoding? 
-            # Actually preprocess should return (shuffle the data): 
-            # before  middle  after -> before  placeholder  after  SOD (start of decoding)  middle  END XX XX (pad)
-            # NOTE: metadata_dict['decoding_end'] is not used for inpaint_non_optimized 
-            # dataloader_generator.dataset.process_score('/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Bach, Carl Philipp Emanuel, Keyboard Sonata in F 
-            x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=piece.n_inpaint)
-            warn("In place changing decoding_end, possible bug")
-            metadata_dict['decoding_end'] = min(torch.tensor(orig_seq_length + 3, device=metadata_dict['decoding_end'].device), metadata_dict['decoding_end'])
+            x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=n_inpaint)
             placeholder_duration = metadata_dict['placeholder_duration'].item()
-            # ts = torch.arange(0, placeholder_duration, c.step)
             ts = c.experiment.time_points_generator(x, metadata_dict)
             # TODO: ugly to check like this. Alternatively we could require that
             # the times are always relative. However, would be problematic for matching,
@@ -302,14 +327,15 @@ def main(c :Config):
                 x=x.clone(),
                 interpolation_time_points=ts,
                 k_traces=c.k_traces,
-                weight_fn=c.weight,
+                weight_fn=c.experiment.weight,
                 metadata_dict=metadata_dict,
                 piece=piece,
                 temperature=1.0,
                 top_p=1.0,
                 top_k=0,
-                interpolator_template=c.ic_curve,
-                num_max_generated_events=num_max_generated_events
+                interpolator_template=c.experiment.ic_curve,
+                # num_max_generated_events=num_max_generated_events
+                num_max_generated_events=None
             )
             end_time = time.time()
             file_folder = piece_folder.joinpath(f'{i}')

@@ -1,30 +1,4 @@
 app:
-  label: mozart_normal_sampling
-  pieces:
-    # /share/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi/PianoMidi-PianoIterator/validation/
-    - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
-      start_node: 25
-      n_inpaint: 101
-    # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
-    #   start_node:  256
-    #   n_inpaint: 256
-    # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
-    #   start_node:  512
-    #   n_inpaint: 256
-
-    # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Ankunft bei den schwarzen Schwänen, WWV 95, 83pIdDPBQg4.mid'
-    #   start_node: 0
-    #   n_inpaint: 256
-    # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Bach, Carl Philipp Emanuel, Keyboard Sonata in F major, H.55, zRPTf8eGLWc.mid'
-    #   start_node: 0
-    #   n_inpaint: 256
-    # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wieniawski, Józef, Rêverie, Op.45, WaKCcUPl7Io.mid'
-    #   start_node: 0
-    #   n_inpaint: 256
-    # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Piano Sonata in B-flat major, WWV 21, kOlm0TGeZHY.mid'
-    #   start_node: 0
-    #   n_inpaint: 256
-    # NOTE: range of timepoits
   k_traces: 1
   samples_per_template: 60
   experiment:
@@ -37,6 +11,39 @@ app:
       init_args:
         window_size: 0.5
         c: 0.5
+    dataset:
+      class_path: DataCache
+      init_args:
+        label: 'validation'
+        n_inpaint: 128
+        n_pieces: 100
+      # class_path: DataPiece
+      # init_args:
+      #   label: mozart_normal_sampling
+      #   pieces:
+      #     # /share/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi/PianoMidi-PianoIterator/validation/
+      #     - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
+      #       start_node: 25
+      #       n_inpaint: 101
+      #     # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
+      #     #   start_node:  256
+      #     #   n_inpaint: 256
+      #     # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
+      #     #   start_node:  512
+      #     #   n_inpaint: 256
+
+      #     # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Ankunft bei den schwarzen Schwänen, WWV 95, 83pIdDPBQg4.mid'
+      #     #   start_node: 0
+      #     #   n_inpaint: 256
+      #     # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Bach, Carl Philipp Emanuel, Keyboard Sonata in F major, H.55, zRPTf8eGLWc.mid'
+      #     #   start_node: 0
+      #     #   n_inpaint: 256
+      #     # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wieniawski, Józef, Rêverie, Op.45, WaKCcUPl7Io.mid'
+      #     #   start_node: 0
+      #     #   n_inpaint: 256
+      #     # - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Piano Sonata in B-flat major, WWV 21, kOlm0TGeZHY.mid'
+      #     #   start_node: 0
+      #     #   n_inpaint: 256
     # ic_curve:
     #   class_path: CIA.ic.Piecewise
     #   init_args:

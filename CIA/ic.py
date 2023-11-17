@@ -69,6 +69,22 @@ class Piecewise(DrawnICCurve):
 
 
 @dataclass
+class TimepointsGenerator(Callable[[torch.FloatTensor, dict], torch.FloatTensor]):
+    # interface for extracting the timepoints for which the IC needs to be computed
+    def __call__(self, piece: torch.LongTensor, metadata_dict: dict) -> torch.FloatTensor:
+        raise NotImplementedError
+
+@dataclass
+class FixedStepTimepoints(TimepointsGenerator):
+    step : float
+    def __call__(self, piece: torch.LongTensor, metadata_dict: dict) -> torch.FloatTensor:
+        placeholder_duration = metadata_dict['placeholder_duration'].item()
+        return torch.arange(0, placeholder_duration, self.step)
+    
+
+
+
+@dataclass
 class Interpolator(ICCurve):
     ic_times : Iterable[torch.FloatTensor]
     ics: Iterable[torch.FloatTensor]
@@ -88,7 +104,12 @@ class Interpolator(ICCurve):
         return einops.einsum(w, self.ics, 'bz T tok, bz tok ... -> bz T ...')
 
 @dataclass
-class MovingAverage(Callable[[torch.FloatTensor], torch.FloatTensor]):
+class Weight(Callable[[torch.FloatTensor], torch.FloatTensor]):
+    def __call__(self, time_diffs : torch.FloatTensor) -> torch.Tensor:
+        raise NotImplementedError
+
+@dataclass
+class MovingAverage(Weight):
     window_size : float
     c: float
     def __call__(self, time_diffs : torch.FloatTensor) -> torch.Tensor:
@@ -96,6 +117,7 @@ class MovingAverage(Callable[[torch.FloatTensor], torch.FloatTensor]):
         mov_avg = (-self.c*time_diffs).exp()
         mov_avg[time_diffs>=self.window_size] = 0
         return mov_avg
+
 
 @dataclass
 class Piece:
@@ -113,6 +135,7 @@ class ICRes:
     timepoints_int: torch.Tensor
     decoding_end: int
     piece: Piece
+    ic_dev: Optional[torch.Tensor] = None
     def write(self, p : Path):
         torch.save(obj=self, f=p)
     @classmethod

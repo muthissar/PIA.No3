@@ -1,5 +1,5 @@
 app:
-  label: mozart
+  label: mozart_normal_sampling
   pieces:
     # /share/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi/PianoMidi-PianoIterator/validation/
     - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
@@ -25,38 +25,42 @@ app:
     #   start_node: 0
     #   n_inpaint: 256
     # NOTE: range of timepoits
-  step: 0.5
-  k_traces: 128
-  weight:
-    class_path: CIA.ic.MovingAverage
-    init_args:
-      window_size: 0.5
-      c: 0.
-  samples_per_template: 4
-  # ic_curve:
-  #   class_path: CIA.ic.Piecewise
-  #   init_args:
-  #     # relative timepoints
-  #     timepoints: [0, .5]
-  #     ics: [
-  #       [5, 5, 5, 5],
-  #       [5, 5, 5, 5],
-  #       [0, 0, 0, 0],
-  #     ]
-  # ic_curve:
-  #   class_path: CIA.ic.LinearInterpolation
-  #   init_args:
-  #     # relative timepoints
-  #     timepoints: [0, .4999, .5, 1.]
-  #     ics: [
-  #       [2.5, 2.5, 2.5, 2.5],
-  #       [7.5, 7.5, 7.5, 7.5],
-  #       [2.5, 2.5, 2.5, 2.5],
-  #       [7.5, 7.5, 7.5, 7.5],
-  #     ]
-  #     # ics: [
-  #     #   [1.25, 1.25, 1.25, 1.25],
-  #     #   [5., 5., 5., 5.],
-  #     # ]
+  k_traces: 1
+  samples_per_template: 60
+  experiment:
+    time_points_generator:
+      class_path: CIA.ic.FixedStepTimepoints
+      init_args:
+        step: 0.5
+    weight:
+      class_path: CIA.ic.MovingAverage
+      init_args:
+        window_size: 0.5
+        c: 0.5
+    # ic_curve:
+    #   class_path: CIA.ic.Piecewise
+    #   init_args:
+    #     # relative timepoints
+    #     timepoints: [0, .5]
+    #     ics: [
+    #       [5, 5, 5, 5],
+    #       [5, 5, 5, 5],
+    #       [0, 0, 0, 0],
+    #     ]
+    # ic_curve:
+    #   class_path: CIA.ic.LinearInterpolation
+    #   init_args:
+    #     # relative timepoints
+    #     timepoints: [0, .4999, .5, 1.]
+    #     ics: [
+    #       [2.5, 2.5, 2.5, 2.5],
+    #       [7.5, 7.5, 7.5, 7.5],
+    #       [2.5, 2.5, 2.5, 2.5],
+    #       [7.5, 7.5, 7.5, 7.5],
+    #     ]
+    #     # ics: [
+    #     #   [1.25, 1.25, 1.25, 1.25],
+    #     #   [5., 5., 5., 5.],
+    #     # ]
     
   logging: DEBUG

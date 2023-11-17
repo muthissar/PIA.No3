@@ -13,7 +13,7 @@ from CIA.getters import get_handler, get_data_processor, \
     get_sos_embedding
 import time
 import importlib
-from CIA.ic import ICCurve, ICRes, unique_timepoints, DrawnICCurve, Piece
+from CIA.ic import ICCurve, ICRes, TimepointsGenerator, Weight, unique_timepoints, DrawnICCurve, Piece
 # from CIA.ic import get_mov_avg
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
@@ -37,25 +37,38 @@ model_dir = 'models/piano_event_performer_2021-10-01_16:03:06'
     # before_nodes: int
     # after_nodes: int
 @dataclasses.dataclass
+class Experiment:
+    time_points_generator: TimepointsGenerator
+    weight : Weight
+    ic_curve: Optional[ICCurve]
+    # NOTE: here we should have either the test set, or some named collection of pieces....
+@dataclasses.dataclass
 class Config:
     pieces : Iterable[Piece]
-    # GPU: int
-    step : float
-    weight : Callable[[torch.FloatTensor], torch.FloatTensor]
+    # the time points defined here(simplified here as step) is piece dependent. For instance it uses the placeholder (for fixed grid,) or uses  
+    # the onesets of the note. Ergo, we need a generator which given a piece generates the time points.
+    # step : float
+    # time_points_generator : TimepointsGenerator
+    # weight : Weight
     k_traces : int
     samples_per_template: int
     logging: str
-    ic_curve: Optional[ICCurve]
+    # NOTE: IC-curve + step defines a metric that we can use to compare experiments
+    # ic_curve: Optional[ICCurve]
+    experiment: Experiment
     label: Optional[str] = None
     
     # local_rank: Optional[int] = None
     def __post_init__(self):
         # TODO: this does not work in geneal, but to keep it simple for now
 
-        args = dict(**self.weight.__dict__, step=self.step, k_traces=self.k_traces)
-        if self.ic_curve is not None:
-            args['ic_curve'] = dataclasses.asdict(self.ic_curve)
-        args_str = slugify(str(tuple(sorted(args.items())))) if self.label is None else self.label
+        # args = dict(weight=str(self.weight), time_points_generator=str(self.time_points_generator), k_traces=self.k_traces)
+        # args_exp = dict(experiment=str(self.experiment), k_traces=self.k_traces)
+        # args_settings = dict(k_traces=self.k_traces)
+        # if self.ic_curve is not None:
+        #     args['ic_curve'] = dataclasses.asdict(self.ic_curve)
+        # args_str = slugify(str(tuple(sorted(args_exp.items())))) + '/' + slugify(str(tu)) if self.label is None else self.label
+        args_str =  f'{slugify(str(self.experiment))}/k-traces-{str(self.k_traces)}' if self.label is None else self.label
         self.out = Path(f'out/{args_str}')
         self.out.mkdir(parents=True, exist_ok=True)
         numeric_level = getattr(logging, self.logging.upper(), None)
@@ -224,13 +237,14 @@ def main(c :Config):
             warn("In place changing decoding_end, possible bug")
             metadata_dict['decoding_end'] = min(torch.tensor(orig_seq_length + 3, device=metadata_dict['decoding_end'].device), metadata_dict['decoding_end'])
             placeholder_duration = metadata_dict['placeholder_duration'].item()
-            ts = torch.arange(0, placeholder_duration, c.step)
+            # ts = torch.arange(0, placeholder_duration, c.step)
+            ts = c.experiment.time_points_generator(x, metadata_dict)
             # TODO: ugly to check like this. Alternatively we could require that
             # the times are always relative. However, would be problematic for matching,
             # since the absolute time differences are important for the scaling.
-            if c.ic_curve is not None:
-                if isinstance(c.ic_curve, DrawnICCurve):
-                    ic_curve : DrawnICCurve = c.ic_curve
+            if c.experiment.ic_curve is not None:
+                if isinstance(c.experiment.ic_curve, DrawnICCurve):
+                    ic_curve : DrawnICCurve = c.experiment.ic_curve
                     ic_curve.set_placeholder_length(placeholder_duration)
 
             # # "open ended"
@@ -363,10 +377,10 @@ def plot(c : Config):
                     'IC tokens',
                     'IC Interpolation',
                     'IC Interpolation summed channels'
-                ) ]
+                ) ] + ['IC Deviation']
 
                 fig_plotly = make_subplots(
-                    rows=len(files) * figs_pr_sample,
+                    rows=len(files) * figs_pr_sample + 1,
                     cols=1,
                     shared_xaxes=True,
                     vertical_spacing=0.03,
@@ -377,13 +391,11 @@ def plot(c : Config):
                 ic_int_summed_max = max([r.ic_int.sum(-1).max() for r in res])
                 cum_ics_list = []
                 entrs_list = []
-                
 
                 for i, (f, r) in enumerate(zip(files, res)):
                     midi = pretty_midi.PrettyMIDI(str(f))
                     # sr = 10
                     sr = 150 # 2 / .02, where 0.02 is the smallest time-shift
-                    warn('There are some problems with the velocities which needs to be investigated! Multiple notes with same pitch on same time')
                     piano_roll = midi.get_piano_roll(sr).T
                     "/share/hel/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Ankunft bei den schwarzen Schwänen, WWV 95, 83pIdDPBQg4.mid"
                     end = piano_roll.shape[0]/sr
@@ -469,8 +481,10 @@ def plot(c : Config):
                     express_to_suplot(fig_plotly, px.line(x=ts_b, y=r.ic_int.flatten(), color=colors, line_shape='hv', labels=dict(x="Time", y="IC", color="Channel")), row=i *figs_pr_sample + 4, col=1)
                     int_summed_channels = r.ic_int.sum(-1)
                     express_to_suplot(fig_plotly, px.line(x=ts, y=int_summed_channels, line_shape='hv', labels=dict(x="Time", y="IC", color="Channel")), row=i *figs_pr_sample + 5, col=1)
-                    
-
+                ic_dev = res_gen.ic_dev
+                ic_dev_sum = ic_dev.sum().item()
+                express_to_suplot(fig_plotly, px.line(x=ts, y=ic_dev, line_shape='hv', labels=dict(x="Time", y=f"IC Deviation", color="Channel")), row=i *figs_pr_sample + 6, col=1)
+                fig_plotly.layout.annotations[10]['text'] = f"IC Deviation , sum={ic_dev_sum}"
                 cum_ics_max = max(cum_ics_list)
                 entrs_max = max(entrs_list)
                 for i in range(2):
@@ -478,11 +492,22 @@ def plot(c : Config):
                     fig_plotly.update_yaxes(range=(0, cum_ics_max+1), row=i *figs_pr_sample + 3, col=1) 
                     fig_plotly.update_yaxes(range=(0, ic_int_max+1), row=i *figs_pr_sample + 4, col=1)
                     fig_plotly.update_yaxes(range=(0, ic_int_summed_max+1), row=i *figs_pr_sample + 5, col=1)
+                fig_height = 2000
+                fig_plotly.update_layout(height=fig_height)
                 fig_plotly.write_html(sample.parent.joinpath('ic_curve.html'))
             # except Exception as e:
             #     logger = multiprocessing.get_logger()
             #     logger.error(f"Failed with expection {e}")
 
+def eval_(c : Config):
+    import wandb
+    warn('Update config')
+    wandb.init(
+        project="ic_gen",
+        config={'k_traces': c.k_traces},
+        group=str(c.experiment)
+    )
+    wandb.run.summary['test'] = 1
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -491,10 +516,12 @@ if __name__ == "__main__":
     # NOTE: needed for torch.distributed.launch
     parser.add_argument("--local_rank", type=int, default=None)
     subcommands = parser.add_subcommands()
-    parser_subcomm1 = ArgumentParser()
-    subcommands.add_subcommand("main", parser_subcomm1)
-    parser_subcomm2 = ArgumentParser()
-    subcommands.add_subcommand("plot", parser_subcomm2)
+    main_subcomm = ArgumentParser()
+    subcommands.add_subcommand("main", main_subcomm)
+    plot_subcomm = ArgumentParser()
+    subcommands.add_subcommand("plot", plot_subcomm)
+    eval_subcomm = ArgumentParser()
+    subcommands.add_subcommand("eval", eval_subcomm)
     args = parser.parse_args()
     init = parser.instantiate_classes(args)
     c : Config = init.app
@@ -512,6 +539,8 @@ if __name__ == "__main__":
 
     elif args.subcommand == "plot":
         plot(c)
+    elif args.subcommand == "eval":
+        eval_(c)
     else:
         raise ValueError(f"Unknown subcommand {args.subcommand}")
 

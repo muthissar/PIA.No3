@@ -577,7 +577,7 @@ class DecoderEventsHandler(Handler):
                 metadata_dict=metadata_dict
                 )
             # warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
-            logger.warning('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
+            # TODO: 'Most likely, we would actually need to start sampling with a shift, if first note should not always align.'
             interpolator_template = Interpolator(
                 ic_times=[timepoints_tok_template],
                 ics=[ic_tok_template],
@@ -594,7 +594,7 @@ class DecoderEventsHandler(Handler):
         #     x[:, decoding_start_event + 1 :] = 0
         #     x[:, decoding_start_event, -1] = 0
         # warn('It does not make sense to limit the number of tokens that we can resample.')
-        logger.warning('It does not make sense to limit the number of tokens that we can resample.')
+        # TODO: 'It does not make sense to limit the number of tokens that we can resample.')
         if num_max_generated_events is not None:
             num_events = min(
                 decoding_start_event + num_max_generated_events, num_events
@@ -612,6 +612,9 @@ class DecoderEventsHandler(Handler):
         timepoint_idx = 0
         first_time_expand = True
         best_index = 0
+        def ic_curve_dev(ic_int, ic_int_temp):
+            # NOTE: for now we just compute the abs of the sum of all channels
+            return (ic_int.sum(-1) - ic_int_temp.sum(-1)).abs()
         with torch.no_grad():
             # event_index corresponds to the position of the token BEING generated
             # for event_index in range(decoding_start_event, num_events):
@@ -771,8 +774,7 @@ class DecoderEventsHandler(Handler):
                     ts = interpolation_time_points[timepoint_idx:timepoint_idx+1]
                     int_time = interpolator(ts)
                     int_time_temp = interpolator_template(ts)
-                    # NOTE: for now we just compute the abs of the sum of all channels
-                    abs_diffs = (int_time.sum(2) - int_time_temp.sum(2)).abs().sum(dim=(1))
+                    abs_diffs = ic_curve_dev(int_time, int_time_temp).sum(dim=1)
                     _, best_index_all = abs_diffs.min(dim=0)
                     # TODO: remove the termination from here to reduce spaghetti code
                     if done.any(-1).all() or timepoint_idx == len(interpolation_time_points) - 1:
@@ -816,28 +818,31 @@ class DecoderEventsHandler(Handler):
         # generated_region = x[first_index, decoding_start_event:decoding_end][None].cpu()
         # # TODO return everything on GPU
         # return x[first_index].cpu(), generated_region, decoding_end, num_event_generated, done
+        ic_int_temp = interpolator_template(interpolation_time_points)[0]
         temp = ICRes(
             tok = original_sequence[0],
             ic_tok = ic_tok_template,
             entr_tok = entr_template,
             timepoints = timepoints_tok_template,
-            ic_int = interpolator_template(interpolation_time_points)[0],
+            ic_int = ic_int_temp,
             timepoints_int = interpolation_time_points,
             decoding_end=template_decoding_end,
             piece = piece
         )
         ic_tok_gen = ics[best_index,decoding_start_event:decoding_end-1].cpu()
         entr_gen = entrs[best_index,decoding_start_event:decoding_end-1].cpu()
+        ic_int_gen = interpolator(interpolation_time_points)[best_index_all]
         gen = ICRes(
             tok = x[best_index_all].cpu(),
             # ics[best_index].cpu(),
             ic_tok = ic_tok_gen,
             entr_tok = entr_gen,
             timepoints = ic_times_list[best_index_all],
-            ic_int = interpolator(interpolation_time_points)[best_index_all],
+            ic_int = ic_int_gen,
             timepoints_int = interpolation_time_points,
             decoding_end=decoding_end,
-            piece = piece
+            piece = piece,
+            ic_dev = ic_curve_dev(ic_int_gen, ic_int_temp)
         )
         return temp, gen
     @staticmethod

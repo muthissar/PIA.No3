@@ -1,0 +1,8 @@
+#!/bin/bash
+DEBUG=FALSE
+if [ "$DEBUG" = "TRUE" ]; then
+    CMD="python -m debugpy --listen 127.0.0.1:5678 --wait-for-client"
+else
+    CMD="python"
+fi
+python combine_configs.py | xargs -I {} bash -c "${CMD} ic_gen.py --config {} eval"

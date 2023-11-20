@@ -1,6 +1,6 @@
 import dataclasses
 from pathlib import Path
-from typing import Callable, Iterable, Optional, Tuple
+from typing import Callable, Iterable, List, Optional, Tuple
 from warnings import warn
 from slugify import slugify
 import torch
@@ -67,7 +67,7 @@ class DataCache(Data):
         # super().dataloader_generator.fset(self, val)
         # super(DataCache, self).dataloader_generator.fset(self, val)
         self.dataloader_generator_ = val
-        ret = self.dataloader_generator.dataloaders(batch_size = 1)
+        ret = self.dataloader_generator.dataloaders(batch_size = 1, shuffle_val=True)
         val.dataset.split = self.label 
         dl_idx = {
             'train': 0,
@@ -78,7 +78,7 @@ class DataCache(Data):
     def __iter__(self):
         for i, original_x in enumerate(self.dataloader):
             if i == self.n_pieces:
-                raise StopIteration
+                return
             piece_name = str(i)
             piece = None
             yield original_x['x'], piece_name, self.n_inpaint, piece
@@ -111,7 +111,7 @@ class DataPiece(Data):
             x = torch.tensor([sample[e] for e in self.dataloader_generator.features])
             original_x = einops.rearrange(x, 'f n -> 1 n f')
             yield original_x, piece_name, piece.n_inpaint, piece
-        raise StopIteration
+        # raise StopIteration
 
 @dataclasses.dataclass
 class Experiment:
@@ -261,6 +261,12 @@ def main(c :Config):
         piece_folder.mkdir(exist_ok=True, parents=True)
         
         for i in tqdm.tqdm(np.arange(rank, c.samples_per_template, world_size), desc='sample pr piece', disable=rank != 0, position=1):
+            
+            file_folder = piece_folder.joinpath(f'{i}')
+            file_folder.mkdir(exist_ok=True, parents=True)
+            gen_file = file_folder.joinpath(f'ic.pt')
+            if gen_file.exists():
+                continue
             x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=n_inpaint)
             placeholder_duration = metadata_dict['placeholder_duration'].item()
             ts = c.experiment.time_points_generator(x, metadata_dict)
@@ -319,32 +325,33 @@ def main(c :Config):
             # k_traces = 128
             # import torch.autograd.profiler as profiler
             # with profiler.profile(profile_memory=True, use_cuda=True, record_shapes=True) as prof:
-            
-            (
-                temp,
-                gen
-            ) = decoder_handler.inpaint_ic_curve(
-                x=x.clone(),
-                interpolation_time_points=ts,
-                k_traces=c.k_traces,
-                weight_fn=c.experiment.weight,
-                metadata_dict=metadata_dict,
-                piece=piece,
-                temperature=1.0,
-                top_p=1.0,
-                top_k=0,
-                interpolator_template=c.experiment.ic_curve,
-                # num_max_generated_events=num_max_generated_events
-                num_max_generated_events=None
-            )
-            end_time = time.time()
-            file_folder = piece_folder.joinpath(f'{i}')
-            file_folder.mkdir(exist_ok=True, parents=True)
-            gen.write(file_folder.joinpath(f'ic.pt'))
-            if i == 0 and rank == 0:
-                file_folder = piece_folder.joinpath('temp')
-                file_folder.mkdir(exist_ok=True, parents=True)
-                temp.write(file_folder.joinpath(f'ic.pt'))
+            try:
+                (
+                    temp,
+                    gen
+                ) = decoder_handler.inpaint_ic_curve(
+                    x=x.clone(),
+                    interpolation_time_points=ts,
+                    k_traces=c.k_traces,
+                    weight_fn=c.experiment.weight,
+                    metadata_dict=metadata_dict,
+                    piece=piece,
+                    temperature=1.0,
+                    top_p=1.0,
+                    top_k=0,
+                    interpolator_template=c.experiment.ic_curve,
+                    # num_max_generated_events=num_max_generated_events
+                    num_max_generated_events=None
+                )
+                end_time = time.time()
+                gen.write(gen_file)
+                if i == 0 and rank == 0:
+                    file_folder = piece_folder.joinpath('temp')
+                    file_folder.mkdir(exist_ok=True, parents=True)
+                    temp.write(file_folder.joinpath(f'ic.pt'))
+            except Exception as e:
+                logger = multiprocessing.get_logger()
+                logger.error(f"Failed generating sample {piece_name} with expection {e}")
 
         # x_inpainted = torch.cat([before, generated_region, after, end], axis=1)
         # x_inpainted = data_processor.postprocess(x_gen, decoding_end, metadata_dict)
@@ -525,19 +532,55 @@ def plot(c : Config):
             #     logger = multiprocessing.get_logger()
             #     logger.error(f"Failed with expection {e}")
 
-def eval_(c : Config):
-    import wandb
-    warn('Update config')
-    wandb.init(
-        project="ic_gen",
-        config={'k_traces': c.k_traces},
-        group=str(c.experiment)
-    )
-    wandb.run.summary['test'] = 1
+def eval_(configs : List[Config]):
+    import pandas as pd
+    # import wandb
+    # warn('Update config')
+    # wandb.init(
+    #     project="ic_gen",
+    #     config={'k_traces': c.k_traces},
+    #     group=str(c.experiment)
+    # )
+    # wandb.run.summary['test'] = 1
+    result = []
+    exps = []
+    params = []
+    pieces = []
+    samples = []
+    times = []
+    ic_devs = []
+    for c in configs:
+        for piece_dir in c.out.glob('*'):
+            if piece_dir.is_dir():            
+                for sample in piece_dir.rglob('*/ic.pt'):
+                    if sample.parent.name != 'temp':
+                        res = ICRes.load(p=sample)
+                        exps.extend(len(res.ic_dev)*[str(c.experiment)])
+                        # TODO: make more general
+                        params.extend(len(res.ic_dev)*[c.k_traces])
+                        pieces.extend(len(res.ic_dev)*[piece_dir.name])
+                        samples.extend(len(res.ic_dev)*[sample.parent.name])
+                        times.extend(res.timepoints_int.numpy())
+                        ic_devs.extend(res.ic_dev.numpy())
+        result= pd.DataFrame({
+            'exps': pd.Categorical(exps),
+            'params': pd.Series(params),
+            'piece' : pd.Series(pieces),
+            'sample' : pd.Series(samples),
+            'time' : pd.Series(times),
+            'ic_dev' : pd.Series(ic_devs)
+        })
+    # grouped = result.groupby(['exps', 'params', 'piece']).apply(lambda x: x.pivot(columns='time', values='ic_dev', index='sample'))
+    # grouped.loc[str(result.exps.iloc[0])].mean(1)
+    # df = result.groupby('params').mean()
+    df = result.groupby(['exps', 'params']).agg({'ic_dev': ['mean', 'std', 'count']})
+    print(df)
+        
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--app", type=Config)  
+    # parser.add_argument("--app", type=Config, nargs='*')  
+    parser.add_argument("--app", type=List[Config])  
     parser.add_argument("--config", action=ActionConfigFile)
     # NOTE: needed for torch.distributed.launch
     parser.add_argument("--local_rank", type=int, default=None)
@@ -550,23 +593,31 @@ if __name__ == "__main__":
     subcommands.add_subcommand("eval", eval_subcomm)
     args = parser.parse_args()
     init = parser.instantiate_classes(args)
-    c : Config = init.app
-    if args.subcommand == "main":
-        if 'RANK' not in  os.environ or int(os.environ['RANK']) == 0 :
-            dir = Path(c.out)
-            dir.mkdir(exist_ok=True, parents=True)
-            parser.save(args, dir.joinpath('config.yaml'), overwrite=True)
-        main(c)
-        # NOTE: allow the processes to finish before plotting
-        if torch.distributed.is_initialized():
-            torch.distributed.barrier()
-        if 'RANK' not in os.environ or int(os.environ['RANK']) == 0 :    
-            plot(c)
+    if args.subcommand in ['main', 'plot']:
+        if len(args.config) > 1:
+                raise NotImplementedError
+        else:
+            c : Config = init.app[0]
+        if args.subcommand == "main":
+            if len(args.config) > 1:
+                raise NotImplementedError
+            else:
+                c : Config = init.app[0]
+            if 'RANK' not in  os.environ or int(os.environ['RANK']) == 0 :
+                dir = Path(c.out)
+                dir.mkdir(exist_ok=True, parents=True)
+                parser.save(args, dir.joinpath('config.yaml'), overwrite=True)
+            main(c)
+            # NOTE: allow the processes to finish before plotting
+            if torch.distributed.is_initialized():
+                torch.distributed.barrier()
+            if 'RANK' not in os.environ or int(os.environ['RANK']) == 0 :    
+                plot(c)
 
-    elif args.subcommand == "plot":
-        plot(c)
+        elif args.subcommand == "plot":
+            plot(c)
     elif args.subcommand == "eval":
-        eval_(c)
+        eval_(init.app)
     else:
         raise ValueError(f"Unknown subcommand {args.subcommand}")
 

@@ -1,6 +1,6 @@
 app:
-  k_traces: 1
-  samples_per_template: 60
+- k_traces: 8
+  samples_per_template: 3
   experiment:
     time_points_generator:
       class_path: CIA.ic.FixedStepTimepoints
@@ -16,7 +16,7 @@ app:
       init_args:
         label: 'validation'
         n_inpaint: 128
-        n_pieces: 100
+        n_pieces: 200
       # class_path: DataPiece
       # init_args:
       #   label: mozart_normal_sampling

@@ -5,7 +5,7 @@ import tempfile
 
 def main():
     # Parse command line arguments
-    parser = ArgumentParser(default_config_files=['eval.yaml'])
+    parser = ArgumentParser(default_config_files=['configs/eval.yaml'])
     parser.add_argument('--configs', type=List[str])
     parser.add_argument('--eval_configs', action=ActionConfigFile)
     args = parser.parse_args()

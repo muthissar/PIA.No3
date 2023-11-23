@@ -12,3 +12,5 @@ workspace.code-workspace
 *.pickle
 
 out/
+__pycache__/
+wandb/

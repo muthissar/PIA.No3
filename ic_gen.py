@@ -15,7 +15,6 @@ from CIA.getters import get_handler, get_data_processor, \
 import time
 import importlib
 from CIA.ic import ICCurve, ICRes, TimepointsGenerator, Weight, unique_timepoints, DrawnICCurve, Piece
-# from CIA.ic import get_mov_avg
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
 import einops
@@ -28,15 +27,11 @@ import pretty_midi
 from jsonargparse import ActionConfigFile, ArgumentParser, CLI, class_from_function
 import logging
 import multiprocessing
-# import plotly.io as pio
-# pio.renderers.default = "vscode"
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 
 model_dir = 'models/piano_event_performer_2021-10-01_16:03:06'
-    # before_nodes: int
-    # after_nodes: int
 
 @dataclasses.dataclass
 class Data(Iterable[Tuple[torch.LongTensor, str, int, Optional[Piece]]]):
@@ -542,43 +537,119 @@ def eval_(configs : List[Config]):
     #     group=str(c.experiment)
     # )
     # wandb.run.summary['test'] = 1
-    result = []
     exps = []
     params = []
     pieces = []
     samples = []
-    times = []
-    ic_devs = []
-    for c in configs:
-        for piece_dir in c.out.glob('*'):
-            if piece_dir.is_dir():            
+    # index = []
+    
+    int_times = []
+    int_ic_devs = []
+    int_ids = []
+
+    tok_times = []
+    # tok_ic_pitch = []
+    # tok_ic_vel = []
+    # tok_ic_dur = []
+    # tok_ic_shift = []
+    tok_ic = [[], [], [], []]
+    tok_ids = []
+
+    
+    # What I should do instead, is simply creating a muliti index (used for both datasets) and have a note table and an int table
+    # The multiindex should then in the latter apper multiple times for observations
+    id_ = 0
+    for c in tqdm.tqdm(configs, desc='Experiment'):
+        for piece_dir in tqdm.tqdm([f for f in c.out.glob('*') if f.is_dir()], desc='Piece'):
+            temp_file = piece_dir.joinpath('temp', 'ic.pt')
+            if temp_file.exists():
+                tem = ICRes.load(p=str(temp_file))
+                # warn('Add the refrence, below is not working since it will also be used when computing other means.')
+                # NOTE: this adds the  same reference file for each experiments...
+                tok_times.extend(tem.timepoints.numpy())
+                # tok_ic.extend(tem.ic_tok.numpy().mean(axis=-1))
+                for ic, feat in zip(tem.ic_tok.numpy().T, tok_ic):
+                    feat.extend(ic)
+                tok_ids.extend(len(tem.ic_tok)*[id_])
+                
+                exps.append(str(c.experiment))
+                params.append("ref")
+                pieces.append(piece_dir.name)
+                samples.append("ref")
+                id_+=1
                 for sample in piece_dir.rglob('*/ic.pt'):
                     if sample.parent.name != 'temp':
-                        res = ICRes.load(p=sample)
-                        exps.extend(len(res.ic_dev)*[str(c.experiment)])
+                        gen = ICRes.load(p=sample)
+                        ic_dev = tem.ic_int.sum(dim=-1) - gen.ic_int.sum(dim=-1)
+                        int_ic_devs.extend(ic_dev.numpy())
+                        int_times.extend(gen.timepoints_int.numpy())
+                        int_ids.extend(len(ic_dev)*[id_])
+                        
+                        tok_times.extend(gen.timepoints.numpy())
+                        # tok_ic.extend(gen.ic_tok.numpy().mean(axis=-1))
+                        for ic, feat in zip(gen.ic_tok.numpy().T, tok_ic):
+                            feat.extend(ic)
+                        tok_ids.extend(len(gen.ic_tok)*[id_])
+                        
+                        exps.append(str(c.experiment))
                         # TODO: make more general
-                        params.extend(len(res.ic_dev)*[c.k_traces])
-                        pieces.extend(len(res.ic_dev)*[piece_dir.name])
-                        samples.extend(len(res.ic_dev)*[sample.parent.name])
-                        times.extend(res.timepoints_int.numpy())
-                        ic_devs.extend(res.ic_dev.numpy())
-        result= pd.DataFrame({
-            'exps': pd.Categorical(exps),
-            'params': pd.Series(params),
-            'piece' : pd.Series(pieces),
-            'sample' : pd.Series(samples),
-            'time' : pd.Series(times),
-            'ic_dev' : pd.Series(ic_devs)
-        })
-    # grouped = result.groupby(['exps', 'params', 'piece']).apply(lambda x: x.pivot(columns='time', values='ic_dev', index='sample'))
-    # grouped.loc[str(result.exps.iloc[0])].mean(1)
-    # df = result.groupby('params').mean()
-    df = result.groupby(['exps', 'params']).agg({'ic_dev': ['mean', 'std', 'count']})
-    print(df)
-        
+                        params.append(c.k_traces)
+                        pieces.append(piece_dir.name)
+                        samples.append(sample.parent.name)
+
+                        id_+=1
+    # index = pd.MultiIndex.from_arrays([pd.Categorical(exps), pd.Categorical(params), pd.Categorical(pieces), pd.Categorical(samples)], names=('exps', 'params', 'piece', 'sample'))
+    ex = pd.DataFrame({
+        # NOTE: categorical does not work with h5
+        # 'exps': pd.Categorical(exps),
+        # 'params': pd.Categorical(params),
+        # 'piece': pd.Categorical(pieces),
+        # 'sample': pd.Categorical(samples)
+        'exps': pd.Series(exps,dtype=str),
+        'params': pd.Series(params, dtype=str),
+        'piece': pd.Series(pieces,dtype=str),
+        'sample': pd.Series(samples, dtype=str)
+    })
+    # TODO: seems uncesserary but don't know how to do groupby with the multiindex alone
+    # index_df = pd.DataFrame(np.arange(len(index)), index=index)
+    # index.groupby()
+    int_df = pd.DataFrame({
+        'ids': int_ids,
+        'time' : pd.Series(int_times, dtype=np.float64),
+        'ic_dev' : pd.Series(int_ic_devs, dtype=np.float64)
+    })
+
+    tok_df = pd.DataFrame({
+        'ids': tok_ids,
+        'time' : pd.Series(tok_times, dtype=np.float64),
+        'ic_pitch' : pd.Series(tok_ic[0], dtype=np.float64),
+        'ic_vel' : pd.Series(tok_ic[1], dtype=np.float64),
+        'ic_dur' : pd.Series(tok_ic[2], dtype=np.float64),
+        'ic_shift' : pd.Series(tok_ic[3], dtype=np.float64),
+        'ic_mean': pd.Series(np.mean(tok_ic, axis=0), dtype=np.float64)
+    })
+    ex.to_hdf('out/results/result.h5', key='ex')
+    int_df.to_hdf('out/results/result.h5', key='int_df')
+    tok_df.to_hdf('out/results/result.h5', key='tok_df')
+    present_df(ex, int_df, tok_df)
+
+def present_df(ex, int_df, tok_df):
+    merged = ex.merge(int_df, left_index=True, right_on="ids",how='outer')
+    res_int = merged[merged['params'] != 'ref'].groupby(['exps', 'params']).agg({'ic_dev': ['mean', ('abs_mean', lambda x: x.abs().mean()), 'std', 'count']})
+    print(res_int.round(3))
+    
+    # merged = ex.merge(tok_df, left_index=True, right_on="ids",how='outer').groupby(['exps', 'params'])
+    # res_not = merged.agg({'ics': ['mean', 'count']})
+    merged = ex.merge(tok_df, left_index=True, right_on="ids",how='outer')
+    cond = (merged['sample'] == 'ref') ^ (merged['params'] != 'ref')
+    res_not = merged.groupby([merged['exps'], merged['params'], cond]).agg({'ic_pitch': ['count', 'mean', 'min', 'max'], 'ic_vel': ['mean', 'min', 'max'], 'ic_dur': ['mean', 'min', 'max'], 'ic_shift': ['mean', 'min', 'max'], 'ic_mean': ['mean']})
+
+    print(res_not.round(3))
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
+    parser = ArgumentParser(
+        # default_config_files=['configs/config.yaml']
+    )
     # parser.add_argument("--app", type=Config, nargs='*')  
     parser.add_argument("--app", type=List[Config])  
     parser.add_argument("--config", action=ActionConfigFile)

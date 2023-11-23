@@ -1,6 +1,7 @@
+import copy
 import dataclasses
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional, Tuple
+from typing import Callable, Iterable, List, Optional, Tuple, Union
 from warnings import warn
 from slugify import slugify
 import torch
@@ -51,12 +52,15 @@ class Data(Iterable[Tuple[torch.LongTensor, str, int, Optional[Piece]]]):
 @dataclasses.dataclass
 class DataCache(Data):
     # dataloader_generator : DataloaderGenerator
-    n_inpaint : int
+    n_inpaint : Union[int, float]
     n_pieces: Optional[int] = None
     def __post_init__(self):
         assert self.label in ['train', 'validation', 'test']
-        assert self.label  != 'test',   'There\'s some problem with the test set' 
-        assert self.n_inpaint < 512 - 5
+        assert self.label  != 'test',   'There\'s some problem with the test set'
+        if isinstance(self.n_inpaint, int):
+            assert self.n_inpaint < 512 - 5
+        elif not isinstance(self.n_inpaint, float):
+            raise NotImplementedError
     @Data.dataloader_generator.setter
     def dataloader_generator(self, val) -> None:
         # super().dataloader_generator.fset(self, val)
@@ -133,42 +137,7 @@ class Config:
         logging.basicConfig(filename=log_file, level=numeric_level)
 
 
-def main(c :Config):
-    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        rank = int(os.environ["RANK"])
-        world_size = int(os.environ["WORLD_SIZE"])
-    else:
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = str(get_free_port())
-        world_size = 1
-        rank = 0
-    # os.environ["MASTER_ADDR"] = "localhost"
-    # os.environ["MASTER_PORT"] = str(get_free_port())
-    # if torch.cuda.is_available():
-    #     torch.distributed.init_process_group(backend='nccl')
-    # else:
-    #     torch.distributed.init_process_group(backend='gloo')
-    # rank = torch.distributed.get_rank()
-    # world_size = torch.distributed.get_world_size()
-    # if torch.distributed.is_initialized():
-    #     rank = torch.distributed.get_rank()
-    #     world_size = torch.distributed.get_world_size()
-    # else:
-    #     rank = 0
-    #     world_size = 1
-    # if torch.cuda.is_available() and c.GPU in list(range(4))
-    if torch.cuda.is_available():
-        torch.distributed.init_process_group(backend="nccl", world_size=world_size, rank=rank)
-        torch.cuda.set_device(rank)
-        device_ids = [rank]
-        output_device = rank
-        device = f"cuda:{rank}"
-    else:
-        # cpu case
-        torch.distributed.init_process_group(backend="gloo", world_size=world_size, rank=rank)
-        device_ids = None
-        output_device = None
-        device = "cpu"
+def main(c :List[Config], device='cpu'):
     # config =  importlib.import_module('CIA.configs.piarceiverStack').config
     # NOTE: override configuration
     config = importlib.import_module('.config_autoreg', f'{model_dir.replace("/", ".")}').config
@@ -221,7 +190,6 @@ def main(c :Config):
         training_phase=False,
         handler_type=config["handler_type"],
     )
-
     decoder.to(device)
     decoder = DistributedDataParallel(
         module=decoder,
@@ -262,7 +230,16 @@ def main(c :Config):
             gen_file = file_folder.joinpath(f'ic.pt')
             if gen_file.exists():
                 continue
-            x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=n_inpaint)
+            
+            if isinstance(n_inpaint, float):
+                rest = original_x[
+                    :, data_processor.num_events_before : 
+                ]
+                durations = dataloader_generator.get_elapsed_time(rest)
+                n_inpaint_ = (durations[0]-n_inpaint).abs().argmin().item()
+            elif isinstance(n_inpaint, int):
+                n_inpaint_ = n_inpaint
+            x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=n_inpaint_)
             placeholder_duration = metadata_dict['placeholder_duration'].item()
             ts = c.experiment.time_points_generator(x, metadata_dict)
             # TODO: ugly to check like this. Alternatively we could require that
@@ -664,29 +641,40 @@ if __name__ == "__main__":
     subcommands.add_subcommand("eval", eval_subcomm)
     args = parser.parse_args()
     init = parser.instantiate_classes(args)
-    if args.subcommand in ['main', 'plot']:
-        if len(args.config) > 1:
-                raise NotImplementedError
+    if args.subcommand == 'main':
+        if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+            rank = int(os.environ["RANK"])
+            world_size = int(os.environ["WORLD_SIZE"])
         else:
-            c : Config = init.app[0]
-        if args.subcommand == "main":
-            if len(args.config) > 1:
-                raise NotImplementedError
-            else:
-                c : Config = init.app[0]
+            os.environ["MASTER_ADDR"] = "localhost"
+            os.environ["MASTER_PORT"] = str(get_free_port())
+            world_size = 1
+            rank = 0
+        if torch.cuda.is_available():
+            torch.distributed.init_process_group(backend="nccl", world_size=world_size, rank=rank)
+            torch.cuda.set_device(rank)
+            device = f"cuda:{rank}"
+        else:
+            # cpu case
+            torch.distributed.init_process_group(backend="gloo", world_size=world_size, rank=rank)
+            device = "cpu"
+        for i, c in enumerate(init.app):
             if 'RANK' not in  os.environ or int(os.environ['RANK']) == 0 :
                 dir = Path(c.out)
                 dir.mkdir(exist_ok=True, parents=True)
-                parser.save(args, dir.joinpath('config.yaml'), overwrite=True)
-            main(c)
+                args_exp = copy.copy(args)
+                args_exp.app = [args.app[i]]
+                parser.save(args_exp, dir.joinpath('config.yaml'), overwrite=True)
+            main(c, device=device)
             # NOTE: allow the processes to finish before plotting
             if torch.distributed.is_initialized():
                 torch.distributed.barrier()
             if 'RANK' not in os.environ or int(os.environ['RANK']) == 0 :    
                 plot(c)
 
-        elif args.subcommand == "plot":
-            plot(c)
+    elif args.subcommand == "plot":
+        raise NotImplementedError('Not migrated to multi config')
+        plot(c)
     elif args.subcommand == "eval":
         eval_(init.app)
     else:

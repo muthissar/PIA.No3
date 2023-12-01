@@ -1,0 +1,149 @@
+app:
+# NOTE: following the ic curve.
+# - k_traces: 1
+#   samples_per_template: 16
+#   experiment:
+#     time_points_generator:
+#       class_path: CIA.ic.FixedStepTimepoints
+#       init_args:
+#         step: 0.5
+#     weight:
+#       class_path: CIA.ic.MovingAverage
+#       init_args:
+#         window_size: 0.5
+#         c: 1.0
+#     dataset:
+#       class_path: DataPiece
+#       init_args:
+#         label: mozart_normal_sampling
+#         pieces:
+#           - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
+#             start_node: 25
+#             n_inpaint: 101
+#   logging: DEBUG
+- k_traces: 16
+  samples_per_template: 16
+  experiment:
+    time_points_generator:
+      class_path: CIA.ic.FixedStepTimepoints
+      init_args:
+        step: 0.5
+    weight:
+      class_path: CIA.ic.MovingAverage
+      init_args:
+        window_size: 0.5
+        # c: [1.0, 'inf', 'inf', 1.0]
+        c: 1.0
+    dataset:
+      class_path: DataPiece
+      init_args:
+        label: mozart_normal_sampling
+        pieces:
+          - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
+            start_node: 25
+            n_inpaint: 101
+  logging: DEBUG
+# - k_traces: 32
+#   samples_per_template: 16
+#   experiment:
+#     time_points_generator:
+#       class_path: CIA.ic.FixedStepTimepoints
+#       init_args:
+#         step: 0.5
+#     weight:
+#       class_path: CIA.ic.MovingAverage
+#       init_args:
+#         window_size: 0.5
+#         c: 1.0
+#     dataset:
+#       class_path: DataPiece
+#       init_args:
+#         label: mozart_normal_sampling
+#         pieces:
+#           - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
+#             start_node: 25
+#             n_inpaint: 101
+#   logging: DEBUG
+# - k_traces: 64
+#   samples_per_template: 16
+#   experiment:
+#     time_points_generator:
+#       class_path: CIA.ic.FixedStepTimepoints
+#       init_args:
+#         step: 0.5
+#     weight:
+#       class_path: CIA.ic.MovingAverage
+#       init_args:
+#         window_size: 0.5
+#         c: 1.0
+#     dataset:
+#       class_path: DataPiece
+#       init_args:
+#         label: mozart_normal_sampling
+#         pieces:
+#           - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
+#             start_node: 25
+#             n_inpaint: 101
+#   logging: DEBUG
+  
+# NOTE: opposite the ic curve (inverted saw).
+# - k_traces: 16
+#   samples_per_template: 16
+#   experiment:
+#     time_points_generator:
+#       class_path: CIA.ic.FixedStepTimepoints
+#       init_args:
+#         step: 0.5
+#     weight:
+#       class_path: CIA.ic.MovingAverage
+#       init_args:
+#         window_size: 0.5
+#         c: 1.0
+#     dataset:
+#       class_path: DataPiece
+#       init_args:
+#         label: debug
+#         pieces:
+#           - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
+#             start_node: 25
+#             n_inpaint: 101
+#     ic_curve:
+#       class_path: CIA.ic.LinearInterpolation
+#       init_args:
+#         relative_time: false
+#         timepoints: [0, 15.0]
+#         ics: [
+#           [5, 5, 5, 5.],
+#           [1.75, 1.75, 1.75, 1.75],
+#         ]
+#   logging: DEBUG
+# - k_traces: 16
+#   samples_per_template: 16
+#   experiment:
+#     time_points_generator:
+#       class_path: CIA.ic.FixedStepTimepoints
+#       init_args:
+#         step: 0.5
+#     weight:
+#       class_path: CIA.ic.MovingAverage
+#       init_args:
+#         window_size: 0.5
+#         c: [1.0, 'inf', 'inf', 1.0]
+#     dataset:
+#       class_path: DataPiece
+#       init_args:
+#         label: debug
+#         pieces:
+#           - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
+#             start_node: 25
+#             n_inpaint: 101
+#     ic_curve:
+#       class_path: CIA.ic.LinearInterpolation
+#       init_args:
+#         relative_time: false
+#         timepoints: [0, 15.0]
+#         ics: [
+#           [7.5, 7.5, 7.5, 7.5],
+#           [1.0, 1.0, 1.0, 1.0],
+#         ]
+#   logging: DEBUG

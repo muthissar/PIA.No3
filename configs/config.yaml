@@ -10,7 +10,7 @@ app:
       class_path: CIA.ic.MovingAverage
       init_args:
         window_size: 0.5
-        c: 0.5
+        c: 1.0
     dataset:
       class_path: DataCache
       init_args:

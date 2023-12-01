@@ -461,7 +461,7 @@ class DecoderEventsHandler(Handler):
         # TODO add arguments to preprocess
         print(f'Placeholder duration: {metadata_dict["placeholder_duration"]}')
         self.eval()
-        batch_size, num_events, _ = x.size()
+        batch_size, num_events, num_channels = x.size()
 
         # TODO only works with batch_size=1 at present
         assert x.size(0) == 1
@@ -579,13 +579,14 @@ class DecoderEventsHandler(Handler):
             # warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
             # TODO: 'Most likely, we would actually need to start sampling with a shift, if first note should not always align.'
             interpolator_template = Interpolator(
-                ic_times=[timepoints_tok_template],
+                ic_times=[timepoints_tok_template[:, None].repeat(1, self.num_channels_target)],
                 ics=[ic_tok_template],
                 weight_fn=weight_fn
             )
         else:
             timepoints_tok_template = None
             ic_tok_template = None
+            entr_template = None
         # just to be sure we erase the tokens to be generated
         # if not regenerate_first_ts:
         #     x[:, decoding_start_event:] = 0
@@ -613,6 +614,7 @@ class DecoderEventsHandler(Handler):
         first_time_expand = True
         best_index = 0
         def ic_curve_dev(ic_int, ic_int_temp):
+            # TODO: deprecate this is actually part of the weighting....
             # NOTE: for now we just compute the abs of the sum of all channels
             return (ic_int.sum(-1) - ic_int_temp.sum(-1)).abs()
         with torch.no_grad():
@@ -764,7 +766,8 @@ class DecoderEventsHandler(Handler):
                         #     break
                     # TODO: we can optimize this by only computing for the ones actively expanded (i.e. in batch_index),
                     # start_time = time.time()
-                    ic_times_list = [dur[decoding_start_event-1:event_index-1] for dur, event_index in zip(generated_duration, event_indices)]
+                    # TODO: make the expantion prettier
+                    ic_times_list = [dur[decoding_start_event-1:event_index-1][:, None].repeat(1, self.num_channels_target) for dur, event_index in zip(generated_duration, event_indices)]
                     ics_list = [ic[decoding_start_event:event_index] for ic,event_index in zip(ics, event_indices)]
                     interpolator = Interpolator(
                         ic_times = ic_times_list,

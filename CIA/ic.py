@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional, Type
+from typing import Callable, Iterable, List, Optional, Type, Union
 from typing_extensions import Self
 import einops
 
@@ -30,8 +30,10 @@ class ICCurve(Callable[[torch.FloatTensor], torch.FloatTensor]):
         raise NotImplementedError
 @dataclass
 class DrawnICCurve(ICCurve):
+    relative_time: bool
     def set_placeholder_length(self, placholder_length : float):
-        self._placeholder_scale = 1 / placholder_length
+        if self.relative_time:
+            self._placeholder_scale = 1 / placholder_length
     def __post_init__(self):
         self._placeholder_scale = 1.
 @dataclass
@@ -87,21 +89,22 @@ class FixedStepTimepoints(TimepointsGenerator):
 @dataclass
 class Interpolator(ICCurve):
     ic_times : Iterable[torch.FloatTensor]
-    ics: Iterable[torch.FloatTensor]
+    ics: Iterable[torch.FloatTensor] 
     weight_fn: Callable[[torch.FloatTensor], torch.FloatTensor]
     def __post_init__(self):
         lens = [len(ic) for ic in self.ics]
         assert all(l == len(ic) for l, ic in zip(lens, self.ics))
-        self.ic_times = torch.nn.utils.rnn.pad_sequence(self.ic_times, batch_first=True)
+        self.ic_times = torch.nn.utils.rnn.pad_sequence(self.ic_times, batch_first=True)[..., None]
         self.ics = torch.nn.utils.rnn.pad_sequence(self.ics, batch_first=True)
+        assert self.ic_times.dim() == 4 and self.ics.dim() == 3 # bz, tokens, channels, (t=1?)
 
     def __call__(self, t : torch.FloatTensor) -> torch.FloatTensor:
-        # NOTE: a matrix of (bz, T, TOKENS)
-        time_diffs = t[None, :, None] - self.ic_times[:, None]
+        #time_diffs = t[None, :, None] - self.ic_times[:, None]
+        time_diffs = einops.rearrange(t, '(bz tok chan t) -> bz tok chan t', bz=1, chan=1, tok=1) - self.ic_times
         w = self.weight_fn(time_diffs)
         w[time_diffs <.0] = 0.
-        # NOTE: automatically the padding cancels automatically because of the ic padding.
-        return einops.einsum(w, self.ics, 'bz T tok, bz tok ... -> bz T ...')
+        # NOTE: the ic padding cancels automatically.
+        return einops.einsum(w, self.ics, 'bz tok chan t, bz tok chan -> bz t chan')
 
 @dataclass
 class Weight(Callable[[torch.FloatTensor], torch.FloatTensor]):
@@ -111,10 +114,18 @@ class Weight(Callable[[torch.FloatTensor], torch.FloatTensor]):
 @dataclass
 class MovingAverage(Weight):
     window_size : float
-    c: float
+    c: Union[float, List[Union[float, str]]]
+    def __post_init__(self):
+        if isinstance(self.c, List):
+            self.c = [float(c_) for c_ in self.c]
+        elif isinstance(self.c, float):
+            self.c = [self.c]
+        self.c_ = torch.tensor(self.c)[None, None, :, None] # bz=1, tok=1, channels
     def __call__(self, time_diffs : torch.FloatTensor) -> torch.Tensor:
-        # NOTE: (bz, T, tokens)
-        mov_avg = (-self.c*time_diffs).exp()
+        # NOTE: (bz, T, channels, tokens)
+        # NOTE: numerical stability for 0 * inf
+        e = 1e-9
+        mov_avg = (-self.c_*(time_diffs+e)).exp()
         mov_avg[time_diffs>=self.window_size] = 0
         return mov_avg
 

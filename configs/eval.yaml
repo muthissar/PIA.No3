@@ -4,3 +4,18 @@ configs:
   - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-0-5-dataset-datacache-label-validation-n-inpaint-128-n-pieces-200-ic-curve-none/k-traces-8/config.yaml"
   - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-0-5-dataset-datacache-label-validation-n-inpaint-128-n-pieces-200-ic-curve-none/k-traces-16/config.yaml"
   - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-0-5-dataset-datacache-label-validation-n-inpaint-128-n-pieces-200-ic-curve-none/k-traces-64/config.yaml"
+
+  - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-1-0-dataset-datacache-label-validation-n-inpaint-10-0-n-pieces-200-ic-curve-none/k-traces-1/config.yaml"
+  - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-1-0-dataset-datacache-label-validation-n-inpaint-10-0-n-pieces-200-ic-curve-none/k-traces-4/config.yaml"
+  - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-1-0-dataset-datacache-label-validation-n-inpaint-10-0-n-pieces-200-ic-curve-none/k-traces-8/config.yaml"
+  - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-1-0-dataset-datacache-label-validation-n-inpaint-10-0-n-pieces-200-ic-curve-none/k-traces-16/config.yaml"
+
+  - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-5-0-dataset-datacache-label-validation-n-inpaint-10-0-n-pieces-200-ic-curve-none/k-traces-1/config.yaml"
+  - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-5-0-dataset-datacache-label-validation-n-inpaint-10-0-n-pieces-200-ic-curve-none/k-traces-4/config.yaml"
+  - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-5-0-dataset-datacache-label-validation-n-inpaint-10-0-n-pieces-200-ic-curve-none/k-traces-8/config.yaml"
+  - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-5-0-dataset-datacache-label-validation-n-inpaint-10-0-n-pieces-200-ic-curve-none/k-traces-16/config.yaml"
+
+  - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-1-0-c-2-0-dataset-datacache-label-validation-n-inpaint-10-0-n-pieces-200-ic-curve-none/k-traces-1/config.yaml"
+  # - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-1-0-c-2-0-dataset-datacache-label-validation-n-inpaint-10-0-n-pieces-200-ic-curve-none/k-traces-4/config.yaml"
+  # - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-1-0-c-2-0-dataset-datacache-label-validation-n-inpaint-10-0-n-pieces-200-ic-curve-none/k-traces-8/config.yaml"
+  # - "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-1-0-c-2-0-dataset-datacache-label-validation-n-inpaint-10-0-n-pieces-200-ic-curve-none/k-traces-16/config.yaml"

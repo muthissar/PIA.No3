@@ -1,0 +1,97 @@
+# Decays to 0.08 within the 0.5 second window.
+app:
+- k_traces: 1
+  samples_per_template: 4
+  logging: DEBUG  
+  experiment:
+    time_points_generator:
+      class_path: CIA.ic.FixedStepTimepoints
+      init_args:
+        step: 0.5
+    weight:
+      class_path: CIA.ic.MovingAverage
+      init_args:
+        window_size: 1.0
+        c: 2.0
+    dataset:
+      class_path: DataCache
+      init_args:
+        label: 'validation'
+        n_inpaint: 10.0
+        n_pieces: 200
+- k_traces: 2
+  samples_per_template: 4
+  logging: DEBUG  
+  experiment:
+    time_points_generator:
+      class_path: CIA.ic.FixedStepTimepoints
+      init_args:
+        step: 0.5
+    weight:
+      class_path: CIA.ic.MovingAverage
+      init_args:
+        window_size: 1.0
+        c: 2.0
+    dataset:
+      class_path: DataCache
+      init_args:
+        label: 'validation'
+        n_inpaint: 10.0
+        n_pieces: 200
+- k_traces: 4
+  samples_per_template: 4
+  logging: DEBUG  
+  experiment:
+    time_points_generator:
+      class_path: CIA.ic.FixedStepTimepoints
+      init_args:
+        step: 0.5
+    weight:
+      class_path: CIA.ic.MovingAverage
+      init_args:
+        window_size: 1.0
+        c: 2.0
+    dataset:
+      class_path: DataCache
+      init_args:
+        label: 'validation'
+        n_inpaint: 10.0
+        n_pieces: 200
+- k_traces: 8
+  samples_per_template: 4
+  logging: DEBUG  
+  experiment:
+    time_points_generator:
+      class_path: CIA.ic.FixedStepTimepoints
+      init_args:
+        step: 0.5
+    weight:
+      class_path: CIA.ic.MovingAverage
+      init_args:
+        window_size: 1.0
+        c: 2.0
+    dataset:
+      class_path: DataCache
+      init_args:
+        label: 'validation'
+        n_inpaint: 10.0
+        n_pieces: 200
+- k_traces: 16
+  samples_per_template: 4
+  logging: DEBUG  
+  experiment:
+    time_points_generator:
+      class_path: CIA.ic.FixedStepTimepoints
+      init_args:
+        step: 0.5
+    weight:
+      class_path: CIA.ic.MovingAverage
+      init_args:
+        window_size: 1.0
+        c: 2.0
+    dataset:
+      class_path: DataCache
+      init_args:
+        label: 'validation'
+        n_inpaint: 10.0
+        n_pieces: 200

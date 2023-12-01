@@ -134,10 +134,14 @@ class Config:
         if not isinstance(numeric_level, int):
             raise ValueError('Invalid log level: %s' % self.logging)
         log_file = self.out.joinpath('log.txt')
+        # TODO: this is problematic, since we need to have one per experiment and since apparantly with 
+        # the multiproc we do cannot ask for a nemed one?
         logging.basicConfig(filename=log_file, level=numeric_level)
+        # logging.getLogger()
 
 
 def main(c :List[Config], device='cpu'):
+    logger = multiprocessing.get_logger()
     # config =  importlib.import_module('CIA.configs.piarceiverStack').config
     # NOTE: override configuration
     config = importlib.import_module('.config_autoreg', f'{model_dir.replace("/", ".")}').config
@@ -235,8 +239,16 @@ def main(c :List[Config], device='cpu'):
                 rest = original_x[
                     :, data_processor.num_events_before : 
                 ]
-                durations = dataloader_generator.get_elapsed_time(rest)
+                # TODO: rewrite for clearness, removes padding
+                rest_ = rest[:, rest[0,:,3] != 105, :]
+                if rest_.numel() == 0:
+                    logger.error(f"Skipping {piece_name} since its all padding")
+                    continue
+                durations = dataloader_generator.get_elapsed_time(rest_)
                 n_inpaint_ = (durations[0]-n_inpaint).abs().argmin().item()
+                if n_inpaint_ <= 1 or (durations == 0).all():
+                    logger.error(f"Skipping {piece_name} since it has no duration")
+                    continue
             elif isinstance(n_inpaint, int):
                 n_inpaint_ = n_inpaint
             x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=n_inpaint_)
@@ -297,33 +309,32 @@ def main(c :List[Config], device='cpu'):
             # k_traces = 128
             # import torch.autograd.profiler as profiler
             # with profiler.profile(profile_memory=True, use_cuda=True, record_shapes=True) as prof:
-            try:
-                (
-                    temp,
-                    gen
-                ) = decoder_handler.inpaint_ic_curve(
-                    x=x.clone(),
-                    interpolation_time_points=ts,
-                    k_traces=c.k_traces,
-                    weight_fn=c.experiment.weight,
-                    metadata_dict=metadata_dict,
-                    piece=piece,
-                    temperature=1.0,
-                    top_p=1.0,
-                    top_k=0,
-                    interpolator_template=c.experiment.ic_curve,
-                    # num_max_generated_events=num_max_generated_events
-                    num_max_generated_events=None
-                )
-                end_time = time.time()
-                gen.write(gen_file)
-                if i == 0 and rank == 0:
-                    file_folder = piece_folder.joinpath('temp')
-                    file_folder.mkdir(exist_ok=True, parents=True)
-                    temp.write(file_folder.joinpath(f'ic.pt'))
-            except Exception as e:
-                logger = multiprocessing.get_logger()
-                logger.error(f"Failed generating sample {piece_name} with expection {e}")
+            # try:
+            (
+                temp,
+                gen
+            ) = decoder_handler.inpaint_ic_curve(
+                x=x.clone(),
+                interpolation_time_points=ts,
+                k_traces=c.k_traces,
+                weight_fn=c.experiment.weight,
+                metadata_dict=metadata_dict,
+                piece=piece,
+                temperature=1.0,
+                top_p=1.0,
+                top_k=0,
+                interpolator_template=c.experiment.ic_curve,
+                # num_max_generated_events=num_max_generated_events
+                num_max_generated_events=None
+            )
+            end_time = time.time()
+            gen.write(gen_file)
+            if i == 0 and rank == 0:
+                file_folder = piece_folder.joinpath('temp')
+                file_folder.mkdir(exist_ok=True, parents=True)
+                temp.write(file_folder.joinpath(f'ic.pt'))
+            # except Exception as e:
+            #     logger.error(f"Failed generating sample {piece_name} with expection {e}")
 
         # x_inpainted = torch.cat([before, generated_region, after, end], axis=1)
         # x_inpainted = data_processor.postprocess(x_gen, decoding_end, metadata_dict)
@@ -335,6 +346,8 @@ def express_to_suplot(fig_plotly, explot, row, col):
         trace.showlegend = False
         fig_plotly.add_trace(trace, row=row, col=col)
 def plot(c : Config):
+    if not isinstance(c.experiment.dataset, DataPiece):
+        raise NotImplementedError
     config = importlib.import_module('.config_autoreg', f'{model_dir.replace("/", ".")}').config
     for t in ['time_dilation', 'velocity_shift', 'transposition']:
         config['dataloader_generator_kwargs']['transformations'][t] = False
@@ -455,7 +468,11 @@ def plot(c : Config):
                     if r.ic_tok is not None:
                         n_points = len(r.timepoints)
                         c_ = np.broadcast_to(np.array(dataloader_generator.features)[None,:], (n_points, n_channels)).flatten()
-                        times = np.broadcast_to(np.array(r.timepoints + time_before )[:,None], (n_points, n_channels)).flatten()
+                        # NOTE: old functinality
+                        if r.timepoints.dim() == 2:
+                            times = np.array(r.timepoints + time_before ).flatten()
+                        else:
+                            times = np.broadcast_to(np.array(r.timepoints + time_before )[:,None], (n_points, n_channels)).flatten()
                         # times = r.timepoints + time_before 
                         entrs_list.append(r.entr_tok.max())                 
                         scatter = px.scatter(
@@ -487,9 +504,9 @@ def plot(c : Config):
                     int_summed_channels = r.ic_int.sum(-1)
                     express_to_suplot(fig_plotly, px.line(x=ts, y=int_summed_channels, line_shape='hv', labels=dict(x="Time", y="IC", color="Channel")), row=i *figs_pr_sample + 5, col=1)
                 ic_dev = res_gen.ic_dev
-                ic_dev_sum = ic_dev.sum().item()
+                ic_dev_mean = ic_dev.mean().item()
                 express_to_suplot(fig_plotly, px.line(x=ts, y=ic_dev, line_shape='hv', labels=dict(x="Time", y=f"IC Deviation", color="Channel")), row=i *figs_pr_sample + 6, col=1)
-                fig_plotly.layout.annotations[10]['text'] = f"IC Deviation , sum={ic_dev_sum}"
+                fig_plotly.layout.annotations[10]['text'] = f"IC Deviation , mean={ic_dev_mean}"
                 cum_ics_max = max(cum_ics_list)
                 entrs_max = max(entrs_list)
                 for i in range(2):
@@ -500,6 +517,7 @@ def plot(c : Config):
                 fig_height = 2000
                 fig_plotly.update_layout(height=fig_height)
                 fig_plotly.write_html(sample.parent.joinpath('ic_curve.html'))
+                fig_plotly.write_image(sample.parent.joinpath('ic_curve.svg'))
             # except Exception as e:
             #     logger = multiprocessing.get_logger()
             #     logger.error(f"Failed with expection {e}")
@@ -613,6 +631,14 @@ def eval_(configs : List[Config]):
 def present_df(ex, int_df, tok_df):
     merged = ex.merge(int_df, left_index=True, right_on="ids",how='outer')
     res_int = merged[merged['params'] != 'ref'].groupby(['exps', 'params']).agg({'ic_dev': ['mean', ('abs_mean', lambda x: x.abs().mean()), 'std', 'count']})
+    # def sort_fun(x):
+    #     def sort_fun_(x):
+    #         try:
+    #             return int(x)
+    #         except ValueError: 
+    #             return -1
+    #     sorted(x, key=sort_fun_)
+    # res_int = res_int.sort_index(level=['params'], key=sort_fun)
     print(res_int.round(3))
     
     # merged = ex.merge(tok_df, left_index=True, right_on="ids",how='outer').groupby(['exps', 'params'])
@@ -667,14 +693,14 @@ if __name__ == "__main__":
                 parser.save(args_exp, dir.joinpath('config.yaml'), overwrite=True)
             main(c, device=device)
             # NOTE: allow the processes to finish before plotting
-            if torch.distributed.is_initialized():
-                torch.distributed.barrier()
-            if 'RANK' not in os.environ or int(os.environ['RANK']) == 0 :    
-                plot(c)
+            # if torch.distributed.is_initialized():
+            #     torch.distributed.barrier()
+            # if 'RANK' not in os.environ or int(os.environ['RANK']) == 0 :    
+            #     plot(c)
 
     elif args.subcommand == "plot":
-        raise NotImplementedError('Not migrated to multi config')
-        plot(c)
+        for c in init.app:
+            plot(c)
     elif args.subcommand == "eval":
         eval_(init.app)
     else:

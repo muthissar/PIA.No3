@@ -6,7 +6,7 @@ from warnings import warn
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 # from CIA.ic import gen_interpolate
-from CIA.ic import ICCurve, ICRes, Interpolator, Piece, unique_timepoints, numerial_stable_softmax_entr
+from CIA.ic import Experiment, ICCurve, ICRes, Interpolator, Piece, unique_timepoints, numerial_stable_softmax_entr
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,
@@ -543,15 +543,17 @@ class DecoderEventsHandler(Handler):
         metadata_dict,
         interpolation_time_points,
         k_traces,
-        weight_fn,
+        # weight_fn,
         piece: Piece,
-        interpolator_template : Optional[torch.FloatTensor] = None,
+        experiment: Experiment = None,
         temperature=1.0,
         top_p=1.0,
         top_k=0,
         num_max_generated_events=None,
         regenerate_first_ts=False,
     ):
+        weight_fn = experiment.weight
+        interpolator_template=experiment.ic_curve
         # TODO add arguments to preprocess
         # print(f'Placeholder duration: {metadata_dict["placeholder_duration"]}')
         logger.debug(f'Placeholder duration: {metadata_dict["placeholder_duration"]}')
@@ -572,21 +574,25 @@ class DecoderEventsHandler(Handler):
         # metadata_dict['original_sequence'] = x.detach().clone()
         # NOTE: this is only for the middle tokens!
         if interpolator_template is None:
-            timepoints_tok_template, ic_tok_template, entr_template = self.compute_token_onsets(
+            timepoints_tok_template, ic_tok_template, entr_tok_template = self.compute_token_onsets(
                 x=metadata_dict['original_sequence'],
                 metadata_dict=metadata_dict
                 )
+            if experiment.match_metric == 'ic':
+                metric_tok_template = ic_tok_template
+            elif experiment.match_metric == 'typicality':
+                metric_tok_template = entr_tok_template - ic_tok_template
             # warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
             # TODO: 'Most likely, we would actually need to start sampling with a shift, if first note should not always align.'
             interpolator_template = Interpolator(
-                ic_times=[timepoints_tok_template[:, None].repeat(1, self.num_channels_target)],
-                ics=[ic_tok_template],
+                metric_times=[timepoints_tok_template[:, None].repeat(1, self.num_channels_target)],
+                metric=[metric_tok_template],
                 weight_fn=weight_fn
             )
         else:
             timepoints_tok_template = None
             ic_tok_template = None
-            entr_template = None
+            entr_tok_template = None
         # just to be sure we erase the tokens to be generated
         # if not regenerate_first_ts:
         #     x[:, decoding_start_event:] = 0
@@ -768,10 +774,14 @@ class DecoderEventsHandler(Handler):
                     # start_time = time.time()
                     # TODO: make the expantion prettier
                     ic_times_list = [dur[decoding_start_event-1:event_index-1][:, None].repeat(1, self.num_channels_target) for dur, event_index in zip(generated_duration, event_indices)]
-                    ics_list = [ic[decoding_start_event:event_index] for ic,event_index in zip(ics, event_indices)]
+                    if experiment.match_metric == 'ic':
+                        ics_list = [ic[decoding_start_event:event_index] for ic,event_index in zip(ics, event_indices)]
+                        metric_list = ics_list
+                    elif experiment.match_metric == 'typicality':
+                        metric_list = [entr[decoding_start_event:event_index] - ic[decoding_start_event:event_index] for entr, ic, event_index in zip(entrs, ics, event_indices)]
                     interpolator = Interpolator(
-                        ic_times = ic_times_list,
-                        ics = ics_list,
+                        metric_times = ic_times_list,
+                        metric = metric_list,
                         weight_fn = weight_fn,
                     )
                     ts = interpolation_time_points[timepoint_idx:timepoint_idx+1]
@@ -825,7 +835,7 @@ class DecoderEventsHandler(Handler):
         temp = ICRes(
             tok = original_sequence[0],
             ic_tok = ic_tok_template,
-            entr_tok = entr_template,
+            entr_tok = entr_tok_template,
             timepoints = timepoints_tok_template,
             ic_int = ic_int_temp,
             timepoints_int = interpolation_time_points,

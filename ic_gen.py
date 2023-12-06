@@ -1,31 +1,27 @@
 import copy
 import dataclasses
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional, Tuple, Union
-from warnings import warn
+from typing import List
 from slugify import slugify
 import torch
 import os
 
 import tqdm
-from CIA.dataloaders.dataloader import DataloaderGenerator
 from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
 from CIA.getters import get_handler, get_data_processor, \
     get_dataloader_generator, get_decoder, get_positional_embedding,\
     get_sos_embedding
 import time
 import importlib
-from CIA.ic import ICCurve, ICRes, TimepointsGenerator, Weight, unique_timepoints, DrawnICCurve, Piece
+from CIA.ic import DataPiece, Experiment, ICRes, DrawnICCurve
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
 import einops
 from CIA.utils import get_free_port
 from CIA.data_processors.data_processor import DataProcessor
-from CIA.handlers.decoder_events_handler import DecoderEventsHandler
 import numpy as np
-import matplotlib.pyplot as plt
 import pretty_midi
-from jsonargparse import ActionConfigFile, ArgumentParser, CLI, class_from_function
+from jsonargparse import ActionConfigFile, ArgumentParser
 import logging
 import multiprocessing
 import plotly.graph_objs as go
@@ -34,91 +30,7 @@ import plotly.express as px
 
 model_dir = 'models/piano_event_performer_2021-10-01_16:03:06'
 
-@dataclasses.dataclass
-class Data(Iterable[Tuple[torch.LongTensor, str, int, Optional[Piece]]]):
-    label: str
-    @property
-    def dataloader_generator(self) -> DataloaderGenerator:
-        return self.dataloader_generator_
-    @dataloader_generator.setter
-    def dataloader_generator(self, val) -> None:
-        self.dataloader_generator_ = val
-    def __len__(self) -> int:
-        raise NotImplementedError
-    def __iter__(self):
-        raise NotImplementedError
 
-
-@dataclasses.dataclass
-class DataCache(Data):
-    # dataloader_generator : DataloaderGenerator
-    n_inpaint : Union[int, float]
-    n_pieces: Optional[int] = None
-    def __post_init__(self):
-        assert self.label in ['train', 'validation', 'test']
-        assert self.label  != 'test',   'There\'s some problem with the test set'
-        if isinstance(self.n_inpaint, int):
-            assert self.n_inpaint < 512 - 5
-        elif not isinstance(self.n_inpaint, float):
-            raise NotImplementedError
-    @Data.dataloader_generator.setter
-    def dataloader_generator(self, val) -> None:
-        # super().dataloader_generator.fset(self, val)
-        # super(DataCache, self).dataloader_generator.fset(self, val)
-        self.dataloader_generator_ = val
-        ret = self.dataloader_generator.dataloaders(batch_size = 1, shuffle_val=True)
-        val.dataset.split = self.label 
-        dl_idx = {
-            'train': 0,
-            'validation': 1,
-            'test': 2
-        }[self.label]
-        self.dataloader = ret[dl_idx]
-    def __iter__(self):
-        for i, original_x in enumerate(self.dataloader):
-            if i == self.n_pieces:
-                return
-            piece_name = str(i)
-            piece = None
-            yield original_x['x'], piece_name, self.n_inpaint, piece
-    def __len__(self) -> int:
-        return len(self.dataloader_generator.dataset) if self.n_pieces is None else self.n_pieces
-        
-@dataclasses.dataclass
-class DataPiece(Data):
-    pieces : Iterable[Piece]
-    def __len__(self) -> int:
-        return len(self.pieces)
-    def __repr__(self) -> str:
-        return f'DataPiece({self.label})'
-    def __iter__(self):
-        for piece in self.pieces:
-            piece_name = Path(piece.path).stem + f'_start_{piece.start_node}_nodes_{piece.n_inpaint}'
-            # NOTE: parallelize over number of samples per piece
-            ds : PianoMidiDataset = self.dataloader_generator.dataset
-            sequence = ds.process_score(piece.path)
-            orig_seq_length = len(sequence['pitch'])
-            if piece.start_node > 0:
-                sequence = {k : v[piece.start_node:] for k,v in sequence.items()}
-            if piece.start_node < 0:
-                raise NotImplementedError('Tetst that indeed it works')
-            sequence = ds.add_start_end_symbols(
-                sequence, start_time=piece.start_node, sequence_size=ds.sequence_size
-            )
-            # Tokenize
-            sample = ds.tokenize(sequence)
-            x = torch.tensor([sample[e] for e in self.dataloader_generator.features])
-            original_x = einops.rearrange(x, 'f n -> 1 n f')
-            yield original_x, piece_name, piece.n_inpaint, piece
-        # raise StopIteration
-
-@dataclasses.dataclass
-class Experiment:
-    time_points_generator: TimepointsGenerator
-    weight : Weight
-    dataset : Data
-    ic_curve: Optional[ICCurve]
-    # NOTE: here we should have either the test set, or some named collection of pieces....
 @dataclasses.dataclass
 class Config:
     k_traces : int
@@ -317,13 +229,13 @@ def main(c :List[Config], device='cpu'):
                 x=x.clone(),
                 interpolation_time_points=ts,
                 k_traces=c.k_traces,
-                weight_fn=c.experiment.weight,
+                experiment=c.experiment,
                 metadata_dict=metadata_dict,
                 piece=piece,
                 temperature=1.0,
                 top_p=1.0,
                 top_k=0,
-                interpolator_template=c.experiment.ic_curve,
+                
                 # num_max_generated_events=num_max_generated_events
                 num_max_generated_events=None
             )
@@ -346,6 +258,7 @@ def express_to_suplot(fig_plotly, explot, row, col):
         trace.showlegend = False
         fig_plotly.add_trace(trace, row=row, col=col)
 def plot(c : Config):
+    # TODO: change all naming to metric
     if not isinstance(c.experiment.dataset, DataPiece):
         raise NotImplementedError
     config = importlib.import_module('.config_autoreg', f'{model_dir.replace("/", ".")}').config
@@ -367,6 +280,8 @@ def plot(c : Config):
         res_temp = ICRes.load(p=temp_file)
         num_middle_tokens = res_temp.decoding_end-1 - (data_processor.num_events_after+data_processor.num_events_before+2)
         temp_midi = temp_file.parent.joinpath(f'song.mid')
+        if temp_midi.exists():
+            continue
         ds : PianoMidiDataset = dataloader_generator.dataset
         sequence = ds.process_score(res_temp.piece.path)
         sequence = ds.tokenize(sequence)
@@ -389,13 +304,14 @@ def plot(c : Config):
                 files = [temp_midi,gen_midi]
                 res = [res_temp, res_gen]
                 figs_pr_sample = 5
+                metric = c.experiment.match_metric.capitalize()
                 titles = [title + f" {type_}" for type_ in ['template', 'generated'] for title in (
                     'Piano roll',
                     'Entr tokens',
-                    'IC tokens',
-                    'IC Interpolation',
-                    'IC Interpolation summed channels'
-                ) ] + ['IC Deviation']
+                    f'{metric} tokens',
+                    f'{metric} Interpolation',
+                    f'{metric} Interpolation summed channels'
+                ) ] + [f'{metric} Deviation']
 
                 fig_plotly = make_subplots(
                     rows=len(files) * figs_pr_sample + 1,
@@ -405,9 +321,9 @@ def plot(c : Config):
                     subplot_titles=titles,
                     )
                 # ic_tok_max = max([r.ic_tok.max() for r in res])
-                ic_int_max = max([r.ic_int.max() for r in res])
-                ic_int_summed_max = max([r.ic_int.sum(-1).max() for r in res])
-                cum_ics_list = []
+                metric_int_max = max([r.ic_int.max() for r in res])
+                metric_int_summed_max = max([r.ic_int.sum(-1).max() for r in res])
+                cum_metric_list = []
                 entrs_list = []
 
                 for i, (f, r) in enumerate(zip(files, res)):
@@ -486,38 +402,38 @@ def plot(c : Config):
                         express_to_suplot(fig_plotly, scatter, row=i *figs_pr_sample + 2, col=1)                        # pass
                         # unique_timepoints_, cum_ics = unique_timepoints(r.timepoints, r.ic_tok)
                         # unique_timepoints_, cum_ics = r.timepoints, r.ic_tok
-                        cum_ics_list.append(r.ic_tok.max())
+                        cum_metric_list.append(r.ic_tok.max())
                         # unique_timepoints_ += time_before                     
                         scatter = px.scatter(
                             x=times,
                             y=r.ic_tok[:, channels].numpy().flatten(),
                             color=c_,
                             # color_discrete_sequence=['red', 'green', 'blue'],
-                            labels=dict(x="Time", y="IC", color="Channel"),
+                            labels=dict(x="Time", y=metric, color="Channel"),
                             # color_continuous_scale="plasma",
                             )
                         express_to_suplot(fig_plotly, scatter, row=i *figs_pr_sample + 3, col=1)
                     ts = r.timepoints_int + time_before
                     ts_b = np.broadcast_to(ts[:,None], r.ic_int.shape).flatten()
                     colors = np.broadcast_to(np.array(dataloader_generator.features)[None, :], r.ic_int.shape).flatten()
-                    express_to_suplot(fig_plotly, px.line(x=ts_b, y=r.ic_int.flatten(), color=colors, line_shape='hv', labels=dict(x="Time", y="IC", color="Channel")), row=i *figs_pr_sample + 4, col=1)
+                    express_to_suplot(fig_plotly, px.line(x=ts_b, y=r.ic_int.flatten(), color=colors, line_shape='hv', labels=dict(x="Time", y=metric, color="Channel")), row=i *figs_pr_sample + 4, col=1)
                     int_summed_channels = r.ic_int.sum(-1)
-                    express_to_suplot(fig_plotly, px.line(x=ts, y=int_summed_channels, line_shape='hv', labels=dict(x="Time", y="IC", color="Channel")), row=i *figs_pr_sample + 5, col=1)
-                ic_dev = res_gen.ic_dev
-                ic_dev_mean = ic_dev.mean().item()
-                express_to_suplot(fig_plotly, px.line(x=ts, y=ic_dev, line_shape='hv', labels=dict(x="Time", y=f"IC Deviation", color="Channel")), row=i *figs_pr_sample + 6, col=1)
-                fig_plotly.layout.annotations[10]['text'] = f"IC Deviation , mean={ic_dev_mean}"
-                cum_ics_max = max(cum_ics_list)
+                    express_to_suplot(fig_plotly, px.line(x=ts, y=int_summed_channels, line_shape='hv', labels=dict(x="Time", y=metric, color="Channel")), row=i *figs_pr_sample + 5, col=1)
+                metric_dev = res_gen.ic_dev
+                metric_dev_mean = metric_dev.mean().item()
+                express_to_suplot(fig_plotly, px.line(x=ts, y=metric_dev, line_shape='hv', labels=dict(x="Time", y=f"{metric} Deviation", color="Channel")), row=i *figs_pr_sample + 6, col=1)
+                fig_plotly.layout.annotations[10]['text'] = f"{metric} Deviation, mean={metric_dev_mean}"
+                cum_metric_max = max(cum_metric_list)
                 entrs_max = max(entrs_list)
                 for i in range(2):
                     fig_plotly.update_yaxes(range=(0, entrs_max+1), row=i *figs_pr_sample + 2, col=1) 
-                    fig_plotly.update_yaxes(range=(0, cum_ics_max+1), row=i *figs_pr_sample + 3, col=1) 
-                    fig_plotly.update_yaxes(range=(0, ic_int_max+1), row=i *figs_pr_sample + 4, col=1)
-                    fig_plotly.update_yaxes(range=(0, ic_int_summed_max+1), row=i *figs_pr_sample + 5, col=1)
+                    fig_plotly.update_yaxes(range=(0, cum_metric_max+1), row=i *figs_pr_sample + 3, col=1) 
+                    fig_plotly.update_yaxes(range=(0, metric_int_max+1), row=i *figs_pr_sample + 4, col=1)
+                    fig_plotly.update_yaxes(range=(0, metric_int_summed_max+1), row=i *figs_pr_sample + 5, col=1)
                 fig_height = 2000
                 fig_plotly.update_layout(height=fig_height)
-                fig_plotly.write_html(sample.parent.joinpath('ic_curve.html'))
-                fig_plotly.write_image(sample.parent.joinpath('ic_curve.svg'))
+                fig_plotly.write_html(sample.parent.joinpath(f'{metric}_curve.html'))
+                # fig_plotly.write_image(sample.parent.joinpath('ic_curve.svg'))
             # except Exception as e:
             #     logger = multiprocessing.get_logger()
             #     logger.error(f"Failed with expection {e}")

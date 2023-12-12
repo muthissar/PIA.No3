@@ -248,3 +248,9 @@ class Experiment:
     # NOTE: here we should have either the test set, or some named collection of pieces....
     def __post_init__(self):
         assert self.match_metric in ['ic', 'typicality']
+
+
+@dataclass
+class SamplingConfig:
+    k_traces: int
+    temperature: float

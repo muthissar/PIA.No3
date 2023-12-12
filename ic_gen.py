@@ -2,6 +2,7 @@ import copy
 import dataclasses
 from pathlib import Path
 from typing import List
+from warnings import warn
 from slugify import slugify
 import torch
 import os
@@ -14,6 +15,7 @@ from CIA.getters import get_handler, get_data_processor, \
 import time
 import importlib
 from CIA.ic import DataPiece, Experiment, ICRes, DrawnICCurve
+from CIA.ic import SamplingConfig
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
 import einops
@@ -30,16 +32,15 @@ import plotly.express as px
 
 model_dir = 'models/piano_event_performer_2021-10-01_16:03:06'
 
-
 @dataclasses.dataclass
 class Config:
-    k_traces : int
+    sampling_config: SamplingConfig
     samples_per_template: int
     logging: str
     experiment: Experiment
     def __post_init__(self):
         # TODO: exp uniquely identifies where
-        args_str =  f'{slugify(str(self.experiment))}/k-traces-{str(self.k_traces)}'
+        args_str =  f'{slugify(str(self.experiment))}/{slugify(str(self.sampling_config))}'
         self.out = Path(f'out/{args_str}')
         self.out.mkdir(parents=True, exist_ok=True)
         numeric_level = getattr(logging, self.logging.upper(), None)
@@ -52,7 +53,7 @@ class Config:
         # logging.getLogger()
 
 
-def main(c :List[Config], device='cpu'):
+def main(c : Config, device='cpu'):
     logger = multiprocessing.get_logger()
     # config =  importlib.import_module('CIA.configs.piarceiverStack').config
     # NOTE: override configuration
@@ -228,11 +229,10 @@ def main(c :List[Config], device='cpu'):
             ) = decoder_handler.inpaint_ic_curve(
                 x=x.clone(),
                 interpolation_time_points=ts,
-                k_traces=c.k_traces,
+                sampling_config=c.sampling_config,
                 experiment=c.experiment,
                 metadata_dict=metadata_dict,
                 piece=piece,
-                temperature=1.0,
                 top_p=1.0,
                 top_k=0,
                 
@@ -504,7 +504,7 @@ def eval_(configs : List[Config]):
                         
                         exps.append(str(c.experiment))
                         # TODO: make more general
-                        params.append(c.k_traces)
+                        params.append(str(c.sampling_config))
                         pieces.append(piece_dir.name)
                         samples.append(sample.parent.name)
 
@@ -529,10 +529,10 @@ def eval_(configs : List[Config]):
         'time' : pd.Series(int_times, dtype=np.float64),
         'ic_dev' : pd.Series(int_ic_devs, dtype=np.float64)
     })
-
+    warn('For now the time of the note is found by meaning the time of the tokens, this might change in future.')
     tok_df = pd.DataFrame({
         'ids': tok_ids,
-        'time' : pd.Series(tok_times, dtype=np.float64),
+        'time' : pd.Series(np.mean(tok_times, axis=-1), dtype=np.float64),
         'ic_pitch' : pd.Series(tok_ic[0], dtype=np.float64),
         'ic_vel' : pd.Series(tok_ic[1], dtype=np.float64),
         'ic_dur' : pd.Series(tok_ic[2], dtype=np.float64),

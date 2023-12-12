@@ -1,5 +1,112 @@
 app:
-- k_traces: 1
+# - sampling_config:
+#     k_traces: 1
+#     temperature: 1.0
+#   samples_per_template: 4
+#   logging: DEBUG  
+#   experiment:
+#     time_points_generator:
+#       class_path: CIA.ic.FixedStepTimepoints
+#       init_args:
+#         step: 0.5
+#     weight:
+#       class_path: CIA.ic.MovingAverage
+#       init_args:
+#         window_size: 0.5
+#         c: 1.0
+#     dataset:
+#       class_path: DataCache
+#       init_args:
+#         label: 'validation'
+#         n_inpaint: 10.0
+#         n_pieces: 200
+# - sampling_config:
+#     k_traces: 2
+#     temperature: 1.0
+#   samples_per_template: 4
+#   logging: DEBUG  
+#   experiment:
+#     time_points_generator:
+#       class_path: CIA.ic.FixedStepTimepoints
+#       init_args:
+#         step: 0.5
+#     weight:
+#       class_path: CIA.ic.MovingAverage
+#       init_args:
+#         window_size: 0.5
+#         c: 1.0
+#     dataset:
+#       class_path: DataCache
+#       init_args:
+#         label: 'validation'
+#         n_inpaint: 10.0
+#         n_pieces: 200
+# - sampling_config:
+#     k_traces: 4
+#     temperature: 1.0
+#   samples_per_template: 4
+#   logging: DEBUG  
+#   experiment:
+#     time_points_generator:
+#       class_path: CIA.ic.FixedStepTimepoints
+#       init_args:
+#         step: 0.5
+#     weight:
+#       class_path: CIA.ic.MovingAverage
+#       init_args:
+#         window_size: 0.5
+#         c: 1.0
+#     dataset:
+#       class_path: DataCache
+#       init_args:
+#         label: 'validation'
+#         n_inpaint: 10.0
+#         n_pieces: 200
+# - sampling_config:
+#     k_traces: 8
+#     temperature: 1.0
+#   samples_per_template: 4
+#   logging: DEBUG  
+#   experiment:
+#     time_points_generator:
+#       class_path: CIA.ic.FixedStepTimepoints
+#       init_args:
+#         step: 0.5
+#     weight:
+#       class_path: CIA.ic.MovingAverage
+#       init_args:
+#         window_size: 0.5
+#         c: 1.0
+#     dataset:
+#       class_path: DataCache
+#       init_args:
+#         label: 'validation'
+#         n_inpaint: 10.0
+#         n_pieces: 200
+# - sampling_config:
+#     k_traces: 16
+#     temperature: 1.0
+#   samples_per_template: 4
+#   logging: DEBUG  
+#   experiment:
+#     time_points_generator:
+#       class_path: CIA.ic.FixedStepTimepoints
+#       init_args:
+#         step: 0.5
+#     weight:
+#       class_path: CIA.ic.MovingAverage
+#       init_args:
+#         window_size: 0.5
+#         c: 1.0
+#     dataset:
+#       class_path: DataCache
+#       init_args:
+#         label: 'validation'
+#         n_inpaint: 10.0
+#         n_pieces: 200
+- sampling_config:
+    k_traces: 16
+    temperature: 2.0
   samples_per_template: 4
   logging: DEBUG  
   experiment:
@@ -18,7 +125,9 @@ app:
         label: 'validation'
         n_inpaint: 10.0
         n_pieces: 200
-- k_traces: 2
+- sampling_config:
+    k_traces: 16
+    temperature: 4.0
   samples_per_template: 4
   logging: DEBUG  
   experiment:
@@ -37,45 +146,9 @@ app:
         label: 'validation'
         n_inpaint: 10.0
         n_pieces: 200
-- k_traces: 4
-  samples_per_template: 4
-  logging: DEBUG  
-  experiment:
-    time_points_generator:
-      class_path: CIA.ic.FixedStepTimepoints
-      init_args:
-        step: 0.5
-    weight:
-      class_path: CIA.ic.MovingAverage
-      init_args:
-        window_size: 0.5
-        c: 1.0
-    dataset:
-      class_path: DataCache
-      init_args:
-        label: 'validation'
-        n_inpaint: 10.0
-        n_pieces: 200
-- k_traces: 8
-  samples_per_template: 4
-  logging: DEBUG  
-  experiment:
-    time_points_generator:
-      class_path: CIA.ic.FixedStepTimepoints
-      init_args:
-        step: 0.5
-    weight:
-      class_path: CIA.ic.MovingAverage
-      init_args:
-        window_size: 0.5
-        c: 1.0
-    dataset:
-      class_path: DataCache
-      init_args:
-        label: 'validation'
-        n_inpaint: 10.0
-        n_pieces: 200
-- k_traces: 16
+- sampling_config:
+    k_traces: 16
+    temperature: 0.5
   samples_per_template: 4
   logging: DEBUG  
   experiment:

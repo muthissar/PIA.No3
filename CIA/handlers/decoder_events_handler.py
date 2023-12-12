@@ -6,7 +6,7 @@ from warnings import warn
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 # from CIA.ic import gen_interpolate
-from CIA.ic import Experiment, ICCurve, ICRes, Interpolator, Piece, unique_timepoints, numerial_stable_softmax_entr
+from CIA.ic import Experiment, ICCurve, ICRes, Interpolator, Piece, SamplingConfig, unique_timepoints, numerial_stable_softmax_entr
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,
@@ -537,16 +537,18 @@ class DecoderEventsHandler(Handler):
         num_event_generated = decoding_end - decoding_start_event
         return x.cpu(), decoding_end, num_event_generated, done
     
+    def app_ent(self, logits, ent=1.0):
+        numerial_stable_softmax_entr(logits, )
+
+
     def inpaint_ic_curve(
         self,
         x,
         metadata_dict,
         interpolation_time_points,
-        k_traces,
-        # weight_fn,
         piece: Piece,
-        experiment: Experiment = None,
-        temperature=1.0,
+        sampling_config : SamplingConfig,
+        experiment: Experiment,
         top_p=1.0,
         top_k=0,
         num_max_generated_events=None,
@@ -564,7 +566,7 @@ class DecoderEventsHandler(Handler):
         index2value = self.dataloader_generator.dataset.index2value
         # decoding_end = None
         placeholder_duration = metadata_dict["placeholder_duration"].item()
-        generated_duration = torch.zeros(k_traces, x.shape[1])
+        generated_duration = torch.zeros(sampling_config.k_traces, x.shape[1])
         decoding_start_event = metadata_dict["decoding_start"]
         template_decoding_end = metadata_dict["decoding_end"].item()
         # NOTE: copy the original sequence:
@@ -578,6 +580,8 @@ class DecoderEventsHandler(Handler):
                 x=metadata_dict['original_sequence'],
                 metadata_dict=metadata_dict
                 )
+            # TODO: Should not necessarily be the case, but for now we assign events to the first timepoint
+            timepoints_tok_template = timepoints_tok_template[:,None].repeat(1, self.num_channels_target)
             if experiment.match_metric == 'ic':
                 metric_tok_template = ic_tok_template
             elif experiment.match_metric == 'typicality':
@@ -585,7 +589,7 @@ class DecoderEventsHandler(Handler):
             # warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
             # TODO: 'Most likely, we would actually need to start sampling with a shift, if first note should not always align.'
             interpolator_template = Interpolator(
-                metric_times=[timepoints_tok_template[:, None].repeat(1, self.num_channels_target)],
+                metric_times=[timepoints_tok_template],
                 metric=[metric_tok_template],
                 weight_fn=weight_fn
             )
@@ -608,11 +612,11 @@ class DecoderEventsHandler(Handler):
             )
         # NOTE: preallocate data structures
         batch_indices = torch.tensor([0])
-        event_indices = torch.tensor(k_traces*[decoding_start_event])
-        x = einops.repeat(x, '1 ... -> k ...', k=k_traces).contiguous()
+        event_indices = torch.tensor(sampling_config.k_traces*[decoding_start_event])
+        x = einops.repeat(x, '1 ... -> k ...', k=sampling_config.k_traces).contiguous()
         ics = torch.zeros_like(x, dtype=torch.float32,device='cpu')
         entrs = torch.zeros_like(x, dtype=torch.float32,device='cpu')
-        done = torch.zeros((k_traces, n_feats), dtype=torch.bool, device='cpu')
+        done = torch.zeros((sampling_config.k_traces, n_feats), dtype=torch.bool, device='cpu')
         # warn('Next two lines only for debugging purposes...')
         # batch_indices = torch.tensor([0,0])
         # event_indices = torch.tensor([decoding_start_event, decoding_start_event])
@@ -633,7 +637,7 @@ class DecoderEventsHandler(Handler):
                         # NOTE indices the sequences which did not yet exceed the timepoint prune limit
                         # start_time = time.time()
                         not_done = ~done.any(-1)
-                        batch_indices = torch.arange(k_traces)[not_done]
+                        batch_indices = torch.arange(sampling_config.k_traces)[not_done]
                         event_indices[not_done] = event_indices[best_index]
                         generated_duration[not_done] = generated_duration[best_index]
                         x[not_done] = x[best_index]
@@ -682,7 +686,11 @@ class DecoderEventsHandler(Handler):
                             weights = self.event_state_to_weight_step(
                                 output, target_embedded, channel_index
                             )
-                            logits = weights / temperature
+                            # TODO: change using ic_times_list
+                            ic_current = 1.0
+                            # t = app_ent(weights, ent=ic_current)
+
+                            logits = weights / sampling_config.temperature
 
                             # Filter logits
                             # filtered_logits = []

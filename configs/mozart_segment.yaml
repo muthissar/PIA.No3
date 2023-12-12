@@ -21,19 +21,23 @@ app:
 #             start_node: 25
 #             n_inpaint: 101
 #   logging: DEBUG
-- k_traces: 16
-  samples_per_template: 16
+- sampling_config:
+    k_traces: 16
+    temperature: 2.0
+  samples_per_template: 4
   experiment:
     time_points_generator:
       class_path: CIA.ic.FixedStepTimepoints
       init_args:
         step: 0.5
+    match_metric: ic
     weight:
       class_path: CIA.ic.MovingAverage
       init_args:
         window_size: 0.5
         # c: [1.0, 'inf', 'inf', 1.0]
         c: 1.0
+        channel_weight: [1.0, 0.0, 0.0, 1.0]
     dataset:
       class_path: DataPiece
       init_args:
@@ -42,6 +46,8 @@ app:
           - path: '/share/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Mozart, Wolfgang Amadeus, Allegro in C major, K.9a_5a, CJe3ISkn-RM.mid'
             start_node: 25
             n_inpaint: 101
+            # start_node: -31
+            # n_inpaint: 37
   logging: DEBUG
 # - k_traces: 32
 #   samples_per_template: 16

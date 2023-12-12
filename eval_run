@@ -1,6 +1,7 @@
 #!/bin/bash
 DEBUG="FALSE"
 PORT="5678"
+CONFIGS=""
 while (( "$#" )); do
   case "$1" in
     --debug)
@@ -9,6 +10,10 @@ while (( "$#" )); do
       ;;
     --port)
       PORT="$2"
+      shift 2
+      ;;
+    --configs)
+      CONFIGS="--configs $2"
       shift 2
       ;;
     --)
@@ -25,4 +30,4 @@ if [ "$DEBUG" = "TRUE" ]; then
 else
     CMD="python"
 fi
-python combine_configs.py | xargs -I {} bash -c "${CMD} ic_gen.py --config {} eval"
+python combine_configs.py "${CONFIGS}" | xargs -I {} bash -c "${CMD} ic_gen.py --config {} eval"

@@ -158,33 +158,33 @@ app:
 #         midi_path: /share/hel/home/mathias/datasets/batik_plays_mozart
 #         # cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi
 #         cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/BatikPlaysMozart
-- sampling_config:
-    k_traces: 64
-    temperature: 2.0
-  samples_per_template: 4
-  logging: DEBUG  
-  experiment:
-    time_points_generator:
-      class_path: CIA.ic.FixedStepTimepoints
-      init_args:
-        step: 0.5
-    weight:
-      class_path: CIA.ic.MovingAverage
-      init_args:
-        window_size: 0.5
-        c: 1.0
-    dataset:
-      class_path: DataCache
-      init_args:
-        # label: 'giant_midi'
-        label: 'batik'
-        split: 'validation'
-        n_inpaint: 10.0
-        n_pieces: 200
-        # midi_path: /share/hel/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/
-        midi_path: /share/hel/home/mathias/datasets/batik_plays_mozart
-        # cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi
-        cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/BatikPlaysMozart
+# - sampling_config:
+#     k_traces: 16
+#     temperature: 1.0
+#   samples_per_template: 4
+#   logging: DEBUG  
+#   experiment:
+#     time_points_generator:
+#       class_path: CIA.ic.FixedStepTimepoints
+#       init_args:
+#         step: 0.5
+#     weight:
+#       class_path: CIA.ic.MovingAverage
+#       init_args:
+#         window_size: 0.5
+#         c: 1.0
+#     dataset:
+#       class_path: DataCache
+#       init_args:
+#         # label: 'giant_midi'
+#         label: 'batik'
+#         split: 'validation'
+#         n_inpaint: 10.0
+#         n_pieces: 200
+#         # midi_path: /share/hel/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/
+#         midi_path: /share/hel/home/mathias/datasets/batik_plays_mozart
+#         # cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi
+#         cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/BatikPlaysMozart
 # - sampling_config:
 #     k_traces: 16
 #     temperature: 0.5
@@ -212,9 +212,36 @@ app:
 #         midi_path: /share/hel/home/mathias/datasets/batik_plays_mozart
 #         # cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi
 #         cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/BatikPlaysMozart
+- sampling_config:
+    k_traces: 16
+    temperature: 2.0
+  samples_per_template: 4
+  logging: DEBUG  
+  experiment:
+    time_points_generator:
+      class_path: CIA.ic.FixedStepTimepoints
+      init_args:
+        step: 0.5
+    weight:
+      class_path: CIA.ic.MovingAverage
+      init_args:
+        window_size: 0.5
+        c: 1.0
+    dataset:
+      class_path: DataCache
+      init_args:
+        # label: 'giant_midi'
+        label: 'batik'
+        split: 'validation'
+        n_inpaint: 10.0
+        n_pieces: 200
+        # midi_path: /share/hel/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/
+        midi_path: /share/hel/home/mathias/datasets/batik_plays_mozart
+        # cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi
+        cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/BatikPlaysMozart
 # - sampling_config:
 #     k_traces: 16
-#     temperature: 2.0
+#     temperature: 4.0
 #   samples_per_template: 4
 #   logging: DEBUG  
 #   experiment:
@@ -240,8 +267,8 @@ app:
 #         # cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi
 #         cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/BatikPlaysMozart
 # - sampling_config:
-#     k_traces: 16
-#     temperature: 4.0
+#     k_traces: 64
+#     temperature: 2.0
 #   samples_per_template: 4
 #   logging: DEBUG  
 #   experiment:

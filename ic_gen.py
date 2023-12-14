@@ -465,8 +465,8 @@ def eval_(configs : List[Config]):
     # What I should do instead, is simply creating a muliti index (used for both datasets) and have a note table and an int table
     # The multiindex should then in the latter apper multiple times for observations
     id_ = 0
-    for c in tqdm.tqdm(configs, desc='Experiment'):
-        for piece_dir in tqdm.tqdm([f for f in c.out.glob('*') if f.is_dir()], desc='Piece'):
+    for c in tqdm.tqdm(configs, desc='Experiment', leave=False):
+        for piece_dir in tqdm.tqdm([f for f in c.out.glob('*') if f.is_dir()], desc='Piece', leave=False):
             temp_file = piece_dir.joinpath('temp', 'ic.pt')
             if temp_file.exists():
                 tem = ICRes.load(p=str(temp_file))
@@ -602,6 +602,7 @@ if __name__ == "__main__":
                 args_exp = copy.copy(args)
                 args_exp.app = [args.app[i]]
                 parser.save(args_exp, dir.joinpath('config.yaml'), overwrite=True)
+            print(f'Experiment: {c.experiment}\n Sampling Config: {c.sampling_config}')
             main(c, device=device)
             # NOTE: allow the processes to finish before plotting
             # if torch.distributed.is_initialized():

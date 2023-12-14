@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import os
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Tuple, Union
 from typing_extensions import Self
@@ -180,26 +181,30 @@ class Data(Iterable[Tuple[torch.LongTensor, str, int, Optional[Piece]]]):
 class DataCache(Data):
     # dataloader_generator : DataloaderGenerator
     n_inpaint : Union[int, float]
+    split : str
+    midi_path : str = field(repr=False)
+    cache_path : str = field(repr=False)
     n_pieces: Optional[int] = None
     def __post_init__(self):
-        assert self.label in ['train', 'validation', 'test']
-        assert self.label  != 'test',   'There\'s some problem with the test set'
+        assert Path(self.midi_path).is_dir()
         if isinstance(self.n_inpaint, int):
             assert self.n_inpaint < 512 - 5
         elif not isinstance(self.n_inpaint, float):
             raise NotImplementedError
+        os.environ['PIA_MIDI_PATH'] = self.midi_path
+        os.environ['PIA_CACHE_PATH'] = self.cache_path
     @Data.dataloader_generator.setter
     def dataloader_generator(self, val) -> None:
         # super().dataloader_generator.fset(self, val)
         # super(DataCache, self).dataloader_generator.fset(self, val)
         self.dataloader_generator_ = val
         ret = self.dataloader_generator.dataloaders(batch_size = 1, shuffle_val=True)
-        val.dataset.split = self.label 
+        val.dataset.split = self.split 
         dl_idx = {
             'train': 0,
             'validation': 1,
             'test': 2
-        }[self.label]
+        }[self.split]
         self.dataloader = ret[dl_idx]
     def __iter__(self):
         for i, original_x in enumerate(self.dataloader):

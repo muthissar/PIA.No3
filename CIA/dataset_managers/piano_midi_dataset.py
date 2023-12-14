@@ -173,7 +173,9 @@ class PianoMidiDataset(data.Dataset):
         # cache_dir = f'{os.path.expanduser("~")}/Data/dataset_cache/PianoMidi'
         # if not os.path.exists(cache_dir):
         #     os.mkdir(cache_dir)
-        cache_dir = f'/share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi'
+        # NOTE: quickfix
+        # cache_dir = f'/share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/PianoMidi'
+        cache_dir = os.environ.get("PIA_CACHE_PATH", None)
         Path(cache_dir).mkdir(parents=True, exist_ok=True)
         return cache_dir
 
@@ -428,6 +430,7 @@ class PianoMidiDataset(data.Dataset):
             shuffle=shuffle_train,
             pin_memory=True,
             drop_last=True,
+            generator=torch.Generator().manual_seed(42),
         )
 
         val_dl = data.DataLoader(
@@ -436,6 +439,7 @@ class PianoMidiDataset(data.Dataset):
             shuffle=shuffle_val,
             pin_memory=True,
             drop_last=True,
+            generator=torch.Generator().manual_seed(42),
         )
 
         test_dl = data.DataLoader(
@@ -444,6 +448,7 @@ class PianoMidiDataset(data.Dataset):
             shuffle=False,
             pin_memory=True,
             drop_last=True,
+            generator=torch.Generator().manual_seed(42),
         )
         return {"train": train_dl, "val": val_dl, "test": test_dl}
 

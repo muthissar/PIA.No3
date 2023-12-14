@@ -1,6 +1,8 @@
 import torch
-from DatasetManager.piano.piano_helper import PianoIteratorGenerator
-from DatasetManager.piano.piano_midi_dataset import PianoMidiDataset
+# from DatasetManager.piano.piano_helper import PianoIteratorGenerator
+# from DatasetManager.piano.piano_midi_dataset import PianoMidiDataset
+from CIA.dataset_managers.piano_helper import PianoIteratorGenerator
+from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
 
 from CIA.dataloaders.dataloader import DataloaderGenerator
 
@@ -43,7 +45,7 @@ class PianoDataloaderGenerator(DataloaderGenerator):
             batch_size,
             shuffle_train=shuffle_train,
             shuffle_val=shuffle_val,
-            num_workers=num_workers,
+            # num_workers=num_workers,
         )
 
         def _build_dataloader(dataloader):

@@ -1,12 +1,11 @@
 import functools
 import os
-import time
-from typing import Any, Callable, Mapping, Optional, Tuple, Union, Iterable
-from warnings import warn
+from typing import Callable, Optional, Tuple, Union, Iterable
+from CIA.dataset_managers.piano_midi_dataset import END_SYMBOL, PAD_SYMBOL, START_SYMBOL
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 # from CIA.ic import gen_interpolate
-from CIA.ic import Experiment, ICCurve, ICRes, Interpolator, Piece, SamplingConfig, unique_timepoints, numerial_stable_softmax_entr
+from CIA.ic import Experiment, ICRes, Interpolator, Piece, SamplingConfig, numerial_stable_softmax_entr
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,
@@ -18,11 +17,34 @@ from tqdm import tqdm
 from itertools import islice
 import numpy as np
 from torch.nn.parallel import DistributedDataParallel
-import torch.distributed as dist
 import einops
 # import logging
 import multiprocessing
 logger = multiprocessing.get_logger()
+    
+def app_ent(
+        logits : torch.Tensor,
+        entr_target  : torch.Tensor,
+        sens : float = 0.1,
+        min_temp = 1e-3,
+        max_temp = 1e5
+    ) -> torch.Tensor:
+    bs = logits.size(0)
+    assert bs == entr_target.size(0)
+    assert (entr_target < np.log(logits.size(-1))).all(), f"entr_target: {entr_target} bigger than max entropy."
+    logits = logits.cpu()
+    curr_temps = torch.tensor(bs*[(min_temp, max_temp)])
+    min_max_temp = numerial_stable_softmax_entr(logits[:, None] / curr_temps[..., None], dim=-1).sum(-1)
+    assert ((min_max_temp < entr_target[:, None]) == torch.tensor([True, False])[None]).all(), "entr_target, not within min/max temp."
+    not_done = torch.tensor(bs*[True])
+    while not_done.any():
+        temp_mid = curr_temps.sum(dim=-1) / 2
+        curr_entr = numerial_stable_softmax_entr(logits/temp_mid[:, None], dim=-1).sum(-1)
+        diff = curr_entr - entr_target
+        not_done = diff.abs() > sens
+        left_mask = diff > 0
+        curr_temps[torch.arange(bs)[not_done], left_mask.long()[not_done]] = temp_mid[not_done]
+    return temp_mid
 
 # TODO duplicated code with decoder_prefix_handler.py
 class DecoderEventsHandler(Handler):
@@ -536,16 +558,13 @@ class DecoderEventsHandler(Handler):
 
         num_event_generated = decoding_end - decoding_start_event
         return x.cpu(), decoding_end, num_event_generated, done
-    
-    def app_ent(self, logits, ent=1.0):
-        numerial_stable_softmax_entr(logits, )
 
 
     def inpaint_ic_curve(
         self,
-        x,
-        metadata_dict,
-        interpolation_time_points,
+        x : torch.LongTensor,
+        metadata_dict : dict,
+        interpolation_time_points : torch.FloatTensor,
         piece: Piece,
         sampling_config : SamplingConfig,
         experiment: Experiment,
@@ -631,7 +650,7 @@ class DecoderEventsHandler(Handler):
             # event_index corresponds to the position of the token BEING generated
             # for event_index in range(decoding_start_event, num_events):
             rank = int(os.environ['RANK']) if 'RANK' in os.environ else 0
-            with tqdm(total=len(interpolation_time_points), position=rank+2, desc=f'Sampling rank: {rank}') as pbar:
+            with tqdm(total=len(interpolation_time_points), position=rank+2, desc=f'Sampling rank: {rank}', leave=False) as pbar:
                 while True:
                     if first_time_expand:
                         # NOTE indices the sequences which did not yet exceed the timepoint prune limit
@@ -687,8 +706,8 @@ class DecoderEventsHandler(Handler):
                                 output, target_embedded, channel_index
                             )
                             # TODO: change using ic_times_list
-                            ic_current = 1.0
-                            # t = app_ent(weights, ent=ic_current)
+                            # ic_current = torch.tensor(weights.size(0) * [2.0])
+                            # t = app_ent(logits=weights, entr_target=ic_current)
 
                             logits = weights / sampling_config.temperature
 
@@ -703,6 +722,17 @@ class DecoderEventsHandler(Handler):
                             # filtered_logits = torch.stack(filtered_logits, dim=0)
                             filtered_logits = logits
                             # Sample from the filtered distribution
+                            # NOTE: lexicon: disable some problematic tokens
+                            if channel_index == 0:
+                                # if event_index == decoding_start_event:
+                                end_symbol_idx = self.dataloader_generator.dataset.value2index['pitch'][END_SYMBOL]
+                                filtered_logits[event_indices[batch_indices] == decoding_start_event, end_symbol_idx] = float('-inf')
+                            if channel_index == 3:
+                                pad_idx = self.dataloader_generator.dataset.value2index['time_shift'][PAD_SYMBOL]
+                                filtered_logits[:, pad_idx] = float('-inf')
+                                start_idx = self.dataloader_generator.dataset.value2index['time_shift'][START_SYMBOL]
+                                filtered_logits[:, start_idx] = float('-inf')
+
                             p = to_numpy(torch.softmax(filtered_logits, dim=-1))
                             # update generated sequence
                             for p_, batch_index, event_index, logits_ in zip(p, batch_indices,  event_indices[batch_indices], filtered_logits):
@@ -737,7 +767,7 @@ class DecoderEventsHandler(Handler):
                                         # if interpolation_time_points[timepoint_idx]/interpolation_time_points[-1] >=done_pct:
                                         done[batch_index, channel_index] = True
                                         # NOTE: avoid end token to be written in the middle tokens
-                                        event_indices[batch_indices] -= 1
+                                        event_indices[batch_index] -= 1
                                         # decoding_end = event_index
                                         logger.info("End of decoding due to END symbol generation")
 
@@ -917,7 +947,7 @@ class DecoderEventsHandler(Handler):
         x : torch.Tensor,
         metadata_dict : dict,
         # match_original_onsets : Optional[Mapping[int, Any]] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # TODO add arguments to preprocess
         self.eval()
         batch_size, num_events, _ = x.size()

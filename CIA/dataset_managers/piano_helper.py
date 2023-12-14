@@ -14,10 +14,12 @@ class PianoIteratorGenerator:
         # TODO hard coded: create multiple IteratorGenerators
         # self.path = f'{os.path.expanduser("~")}/Data/databases/Piano'
         # trains on transcriptions only:
-        self.path = (
-            # f'{os.path.expanduser("~")}/Data/databases/Piano/transcriptions/midi'
-            '/share/hel/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/'
-        )
+        # NOTE: quickfix
+        # self.path = (
+        #     # f'{os.path.expanduser("~")}/Data/databases/Piano/transcriptions/midi'
+        #     '/share/hel/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/'
+        # )
+        self.path = os.environ.get("PIA_MIDI_PATH", None)
         # trains on piano relax
         # self.path = f'{os.path.expanduser("~")}/Data/databases/Piano/transcriptions/relax_piano'
         # trains on dirk
@@ -51,10 +53,12 @@ class PianoIteratorGenerator:
             midi_files += glob.glob(
                 os.path.join(self.path, subset, "*.MID"), recursive=True
             )
-
+        sorted(midi_files)
+        # NOTE: for deterministic split, when all files are the same
+        rng = np.random.default_rng(42)
+        midi_files = np.array(midi_files)[rng.permutation(len(midi_files))]
         if self.num_elements is not None:
             midi_files = midi_files[: self.num_elements]
-
         split_csv_path = os.path.join(self.path, f"split_{str(self)}.csv")
         if not os.path.exists(split_csv_path):
             self._create_split_csv(midi_files, split_csv_path)

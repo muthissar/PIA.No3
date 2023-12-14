@@ -136,18 +136,15 @@ def main(c : Config, device='cpu'):
     # for piece in tqdm.tqdm(c.pieces, desc='Pieces completed', disable=rank != 0, position=0):
     # TODO: this is quite ugly, but how can it be done prettyer using jsonargparse?
     c.experiment.dataset.dataloader_generator = dataloader_generator
-    for original_x, piece_name, n_inpaint, piece in tqdm.tqdm(c.experiment.dataset, desc='Pieces completed', disable=rank != 0, position=0):
+    for original_x, piece_name, n_inpaint, piece in tqdm.tqdm(c.experiment.dataset, desc='Pieces completed', disable=rank != 0, position=0, leave=True):
         piece_folder = c.out.joinpath(piece_name)
         piece_folder.mkdir(exist_ok=True, parents=True)
-        
-        for i in tqdm.tqdm(np.arange(rank, c.samples_per_template, world_size), desc='sample pr piece', disable=rank != 0, position=1):
-            
+        for i in tqdm.tqdm(np.arange(rank, c.samples_per_template, world_size), desc='sample pr piece', disable=rank != 0, position=1, leave=False):
             file_folder = piece_folder.joinpath(f'{i}')
             file_folder.mkdir(exist_ok=True, parents=True)
             gen_file = file_folder.joinpath(f'ic.pt')
             if gen_file.exists():
                 continue
-            
             if isinstance(n_inpaint, float):
                 rest = original_x[
                     :, data_processor.num_events_before : 
@@ -208,7 +205,6 @@ def main(c : Config, device='cpu'):
             # metadata_dict.pop('loss_mask')
             # metadata_dict['decoding_start'] = 0
             # metadata_dict['decoding_end'] = 1024
-            start_time = time.time()
             # NOTE: Here it always attends (!autoregressively!) to full sequence but updates during (autoregressive) decoding.
             # NOTE: model decodes from decode start and decode up to the next num_events_middle. 
             # If at one time the placeholder_duration is exceeded, or END symbol, then it terminates with done.
@@ -239,7 +235,6 @@ def main(c : Config, device='cpu'):
                 # num_max_generated_events=num_max_generated_events
                 num_max_generated_events=None
             )
-            end_time = time.time()
             gen.write(gen_file)
             if i == 0 and rank == 0:
                 file_folder = piece_folder.joinpath('temp')

@@ -1,8 +1,10 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 import os
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Tuple, Union
 from typing_extensions import Self
+from warnings import warn
 import einops
 
 import torch
@@ -10,7 +12,7 @@ import numpy as np
 from CIA.dataloaders.dataloader import DataloaderGenerator
 
 from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
-
+from pretty_midi import PrettyMIDI
 @dataclass
 class ICCurve(Callable[[torch.FloatTensor], torch.FloatTensor]):
     def __call__(self, t : torch.FloatTensor) -> torch.FloatTensor:
@@ -126,9 +128,26 @@ class MovingAverage(Weight):
 @dataclass
 class Piece:
     path: str
-    start_node: int
-    n_inpaint: int
-
+    start_node: Union[int, float, str]
+    n_inpaint: Union[int, float, str]
+    def __post_init__(self):
+        bot = datetime(1900,1,1)
+        if isinstance(self.start_node, str):
+            self.start_node = (datetime.strptime(self.start_node, '%M:%S.%f') - bot).total_seconds()
+        if isinstance(self.n_inpaint, str):
+            self.n_inpaint = (datetime.strptime(self.n_inpaint, '%M:%S.%f') - bot).total_seconds()
+        if isinstance(self.start_node, float) and isinstance(self.n_inpaint, float):
+                midi = PrettyMIDI(self.path)
+                notes_mozart = midi.instruments[0].notes
+                sorted(notes_mozart, key=lambda n: n.start)
+                start_time = self.start_node
+                end_time = start_time + self.n_inpaint
+                start_decoding = np.argmin([abs(n.end - start_time) for n in  notes_mozart])
+                end_decoding= np.argmin([abs(n.end - end_time) for n in  notes_mozart])
+                warn('hard coded n_begin_notes')
+                n_begin_notes = 256
+                self.start_node = start_decoding - n_begin_notes
+                self.n_inpaint = end_decoding - start_decoding
 @dataclass
 class ICRes:
     tok: torch.Tensor
@@ -219,15 +238,19 @@ class DataCache(Data):
 @dataclass
 class DataPiece(Data):
     pieces : Iterable[Piece]
+    # TODO: deprecate
+    cache_path : str = field(repr=False)
+    def __post_init__(self):
+        os.environ['PIA_CACHE_PATH'] = self.cache_path
     def __len__(self) -> int:
         return len(self.pieces)
     def __repr__(self) -> str:
         return f'DataPiece({self.label})'
     def __iter__(self):
+        ds : PianoMidiDataset = self.dataloader_generator.dataset
         for piece in self.pieces:
             piece_name = Path(piece.path).stem + f'_start_{piece.start_node}_nodes_{piece.n_inpaint}'
             # NOTE: parallelize over number of samples per piece
-            ds : PianoMidiDataset = self.dataloader_generator.dataset
             sequence = ds.process_score(piece.path)
             orig_seq_length = len(sequence['pitch'])
             if piece.start_node > 0:

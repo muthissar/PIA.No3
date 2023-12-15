@@ -1,0 +1,29 @@
+app:
+  - sampling_config:
+      k_traces: 16
+      temperature: 1.0
+    samples_per_template: 4
+    logging: DEBUG  
+    experiment:
+      time_points_generator:
+        class_path: CIA.ic.FixedStepTimepoints
+        init_args:
+          step: 0.5
+      weight:
+        class_path: CIA.ic.MovingAverage
+        init_args:
+          window_size: 0.5
+          c: 1.0
+      dataset:
+        class_path: DataPiece
+        init_args:
+          label: mozart_normal_sampling
+          cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/BatikPlaysMozart
+          pieces:
+            - path: '/share/home/mathias/datasets/batik_plays_mozart/midi/kv332_2.mid'
+              # start_node: 149
+              start_node: '1:44.75'
+              # n_inpaint: 177
+              n_inpaint: '0:32.062'
+
+          

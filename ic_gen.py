@@ -1,21 +1,18 @@
 import copy
-import dataclasses
 from pathlib import Path
 from typing import List
 from warnings import warn
-from slugify import slugify
 import torch
 import os
 
 import tqdm
-from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
+from CIA.dataset_managers.piano_midi_dataset import PAD_SYMBOL, PianoMidiDataset
 from CIA.getters import get_handler, get_data_processor, \
     get_dataloader_generator, get_decoder, get_positional_embedding,\
     get_sos_embedding
 import time
 import importlib
-from CIA.ic import DataPiece, Experiment, ICRes, DrawnICCurve
-from CIA.ic import SamplingConfig
+from CIA.ic import DataPiece, ICRes, DrawnICCurve
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
 import einops
@@ -24,32 +21,16 @@ from CIA.data_processors.data_processor import DataProcessor
 import numpy as np
 import pretty_midi
 from jsonargparse import ActionConfigFile, ArgumentParser
-import logging
 import multiprocessing
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 import plotly.express as px
+from ic.app import Config
+
+from ic.eval_ import eval_
 
 model_dir = 'models/piano_event_performer_2021-10-01_16:03:06'
 
-@dataclasses.dataclass
-class Config:
-    sampling_config: SamplingConfig
-    samples_per_template: int
-    logging: str
-    experiment: Experiment
-    def __post_init__(self):
-        # TODO: exp uniquely identifies where
-        args_str =  f'{slugify(str(self.experiment))}/{slugify(str(self.sampling_config))}'
-        self.out = Path(f'out/{args_str}')
-        self.out.mkdir(parents=True, exist_ok=True)
-        numeric_level = getattr(logging, self.logging.upper(), None)
-        if not isinstance(numeric_level, int):
-            raise ValueError('Invalid log level: %s' % self.logging)
-        log_file = self.out.joinpath('log.txt')
-        # TODO: this is problematic, since we need to have one per experiment and since apparantly with 
-        # the multiproc we do cannot ask for a nemed one?
-        logging.basicConfig(filename=log_file, level=numeric_level)
         # logging.getLogger()
 
 
@@ -159,7 +140,7 @@ def main(c : Config, device='cpu'):
                 if n_inpaint_ <= 1 or (durations == 0).all():
                     logger.error(f"Skipping {piece_name} since it has no duration")
                     continue
-            elif isinstance(n_inpaint, int):
+            elif isinstance(n_inpaint, (int, np.integer)):
                 n_inpaint_ = n_inpaint
             x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=n_inpaint_)
             placeholder_duration = metadata_dict['placeholder_duration'].item()
@@ -255,7 +236,8 @@ def express_to_suplot(fig_plotly, explot, row, col):
 def plot(c : Config):
     # TODO: change all naming to metric
     if not isinstance(c.experiment.dataset, DataPiece):
-        raise NotImplementedError
+        warn('Check implimentation, since it is not clear how to handle this case')
+        # raise NotImplementedError
     config = importlib.import_module('.config_autoreg', f'{model_dir.replace("/", ".")}').config
     for t in ['time_dilation', 'velocity_shift', 'transposition']:
         config['dataloader_generator_kwargs']['transformations'][t] = False
@@ -278,13 +260,21 @@ def plot(c : Config):
         if temp_midi.exists():
             continue
         ds : PianoMidiDataset = dataloader_generator.dataset
-        sequence = ds.process_score(res_temp.piece.path)
-        sequence = ds.tokenize(sequence)
-        sequence = torch.tensor([sequence[e] for e in dataloader_generator.features])
-        sequence = einops.rearrange(sequence, 'f n -> n f')
-        before = sequence[:data_processor.num_events_before+res_temp.piece.start_node]
-        after = sequence[res_temp.piece.start_node+data_processor.num_events_before+num_middle_tokens:]
-        dataloader_generator.write(sequence, temp_midi.parent.joinpath(temp_midi.stem))
+        decoding_start = data_processor.num_events_after+data_processor.num_events_before+2
+        if res_temp.piece is not None:
+            sequence = ds.process_score(res_temp.piece.path)
+            sequence = ds.tokenize(sequence)
+            sequence = torch.tensor([sequence[e] for e in dataloader_generator.features])
+            sequence = einops.rearrange(sequence, 'f n -> n f')
+            before = sequence[:data_processor.num_events_before+res_temp.piece.start_node]
+            after = sequence[res_temp.piece.start_node+data_processor.num_events_before+num_middle_tokens:]
+            dataloader_generator.write(sequence, temp_midi.parent.joinpath(temp_midi.stem))
+        else:
+            before = res_temp.tok[:data_processor.num_events_before]
+            after = res_temp.tok[data_processor.num_events_before+1: decoding_start-1]
+            middle_tokens_temp = res_temp.tok[decoding_start:res_temp.decoding_end-1]
+            sequence = torch.cat([before, middle_tokens_temp, after], axis=0)
+            dataloader_generator.write(sequence, temp_midi.parent.joinpath(temp_midi.stem))
         for sample in song_dir.rglob('*/ic.pt'):
             # try:
                 if sample == temp_file:
@@ -323,21 +313,21 @@ def plot(c : Config):
 
                 for i, (f, r) in enumerate(zip(files, res)):
                     midi = pretty_midi.PrettyMIDI(str(f))
-                    # sr = 10
-                    sr = 150 # 2 / .02, where 0.02 is the smallest time-shift
+                    sr = 25
+                    # sr = 150 # 2 / .02, where 0.02 is the smallest time-shift
                     piano_roll = midi.get_piano_roll(sr).T
-                    "/share/hel/home/mathias/.cache/mutdata/pia/databases/Piano/transcriptions/midi/Wagner, Richard, Ankunft bei den schwarzen Schwänen, WWV 95, 83pIdDPBQg4.mid"
                     end = piano_roll.shape[0]/sr
 
                     pitch_range = (24,96)
                     image = px.imshow(
                         # TODO: find better way to do this which keeps the correct values shown...
-                        np.log10(piano_roll.T + 1e-6),
+                        # np.log10(piano_roll.T + 1e-6),
+                        piano_roll.T,
                         origin="lower",
                         color_continuous_scale="plasma",
                         labels=dict(x="Time", y="Pitch", color="Velocity"),
                         x=np.arange(0, end, 1/sr),
-                        )
+                    )
                     # TODO: this low level time calculation of tokens should not be here.
                     time_before = torch.sum(torch.tensor(
                         [dataloader_generator.dataset.index2value['time_shift'][tok[3].item()] for tok in before]
@@ -433,133 +423,6 @@ def plot(c : Config):
             #     logger = multiprocessing.get_logger()
             #     logger.error(f"Failed with expection {e}")
 
-def eval_(configs : List[Config]):
-    import pandas as pd
-    # import wandb
-    # warn('Update config')
-    # wandb.init(
-    #     project="ic_gen",
-    #     config={'k_traces': c.k_traces},
-    #     group=str(c.experiment)
-    # )
-    # wandb.run.summary['test'] = 1
-    exps = []
-    params = []
-    pieces = []
-    samples = []
-    # index = []
-    
-    int_times = []
-    int_ic_devs = []
-    int_ids = []
-
-    tok_times = []
-    # tok_ic_pitch = []
-    # tok_ic_vel = []
-    # tok_ic_dur = []
-    # tok_ic_shift = []
-    tok_ic = [[], [], [], []]
-    tok_ids = []
-
-    
-    # What I should do instead, is simply creating a muliti index (used for both datasets) and have a note table and an int table
-    # The multiindex should then in the latter apper multiple times for observations
-    id_ = 0
-    for c in tqdm.tqdm(configs, desc='Experiment', leave=False):
-        for piece_dir in tqdm.tqdm([f for f in c.out.glob('*') if f.is_dir()], desc='Piece', leave=False):
-            temp_file = piece_dir.joinpath('temp', 'ic.pt')
-            if temp_file.exists():
-                tem = ICRes.load(p=str(temp_file))
-                # warn('Add the refrence, below is not working since it will also be used when computing other means.')
-                # NOTE: this adds the  same reference file for each experiments...
-                tok_times.extend(tem.timepoints.numpy())
-                # tok_ic.extend(tem.ic_tok.numpy().mean(axis=-1))
-                for ic, feat in zip(tem.ic_tok.numpy().T, tok_ic):
-                    feat.extend(ic)
-                tok_ids.extend(len(tem.ic_tok)*[id_])
-                
-                exps.append(str(c.experiment))
-                params.append("ref")
-                pieces.append(piece_dir.name)
-                samples.append("ref")
-                id_+=1
-                for sample in piece_dir.rglob('*/ic.pt'):
-                    if sample.parent.name != 'temp':
-                        gen = ICRes.load(p=sample)
-                        ic_dev = tem.ic_int.sum(dim=-1) - gen.ic_int.sum(dim=-1)
-                        int_ic_devs.extend(ic_dev.numpy())
-                        int_times.extend(gen.timepoints_int.numpy())
-                        int_ids.extend(len(ic_dev)*[id_])
-                        
-                        tok_times.extend(gen.timepoints.numpy())
-                        # tok_ic.extend(gen.ic_tok.numpy().mean(axis=-1))
-                        for ic, feat in zip(gen.ic_tok.numpy().T, tok_ic):
-                            feat.extend(ic)
-                        tok_ids.extend(len(gen.ic_tok)*[id_])
-                        
-                        exps.append(str(c.experiment))
-                        # TODO: make more general
-                        params.append(str(c.sampling_config))
-                        pieces.append(piece_dir.name)
-                        samples.append(sample.parent.name)
-
-                        id_+=1
-    # index = pd.MultiIndex.from_arrays([pd.Categorical(exps), pd.Categorical(params), pd.Categorical(pieces), pd.Categorical(samples)], names=('exps', 'params', 'piece', 'sample'))
-    ex = pd.DataFrame({
-        # NOTE: categorical does not work with h5
-        # 'exps': pd.Categorical(exps),
-        # 'params': pd.Categorical(params),
-        # 'piece': pd.Categorical(pieces),
-        # 'sample': pd.Categorical(samples)
-        'exps': pd.Series(exps,dtype=str),
-        'params': pd.Series(params, dtype=str),
-        'piece': pd.Series(pieces,dtype=str),
-        'sample': pd.Series(samples, dtype=str)
-    })
-    # TODO: seems uncesserary but don't know how to do groupby with the multiindex alone
-    # index_df = pd.DataFrame(np.arange(len(index)), index=index)
-    # index.groupby()
-    int_df = pd.DataFrame({
-        'ids': int_ids,
-        'time' : pd.Series(int_times, dtype=np.float64),
-        'ic_dev' : pd.Series(int_ic_devs, dtype=np.float64)
-    })
-    warn('For now the time of the note is found by meaning the time of the tokens, this might change in future.')
-    tok_df = pd.DataFrame({
-        'ids': tok_ids,
-        'time' : pd.Series(np.mean(tok_times, axis=-1), dtype=np.float64),
-        'ic_pitch' : pd.Series(tok_ic[0], dtype=np.float64),
-        'ic_vel' : pd.Series(tok_ic[1], dtype=np.float64),
-        'ic_dur' : pd.Series(tok_ic[2], dtype=np.float64),
-        'ic_shift' : pd.Series(tok_ic[3], dtype=np.float64),
-        'ic_mean': pd.Series(np.mean(tok_ic, axis=0), dtype=np.float64)
-    })
-    ex.to_hdf('out/results/result.h5', key='ex')
-    int_df.to_hdf('out/results/result.h5', key='int_df')
-    tok_df.to_hdf('out/results/result.h5', key='tok_df')
-    present_df(ex, int_df, tok_df)
-
-def present_df(ex, int_df, tok_df):
-    merged = ex.merge(int_df, left_index=True, right_on="ids",how='outer')
-    res_int = merged[merged['params'] != 'ref'].groupby(['exps', 'params']).agg({'ic_dev': ['mean', ('abs_mean', lambda x: x.abs().mean()), 'std', 'count']})
-    # def sort_fun(x):
-    #     def sort_fun_(x):
-    #         try:
-    #             return int(x)
-    #         except ValueError: 
-    #             return -1
-    #     sorted(x, key=sort_fun_)
-    # res_int = res_int.sort_index(level=['params'], key=sort_fun)
-    print(res_int.round(3))
-    
-    # merged = ex.merge(tok_df, left_index=True, right_on="ids",how='outer').groupby(['exps', 'params'])
-    # res_not = merged.agg({'ics': ['mean', 'count']})
-    merged = ex.merge(tok_df, left_index=True, right_on="ids",how='outer')
-    cond = (merged['sample'] == 'ref') ^ (merged['params'] != 'ref')
-    res_not = merged.groupby([merged['exps'], merged['params'], cond]).agg({'ic_pitch': ['count', 'mean', 'min', 'max'], 'ic_vel': ['mean', 'min', 'max'], 'ic_dur': ['mean', 'min', 'max'], 'ic_shift': ['mean', 'min', 'max'], 'ic_mean': ['mean']})
-
-    print(res_not.round(3))
-
 if __name__ == "__main__":
     parser = ArgumentParser(
         # default_config_files=['configs/config.yaml']
@@ -575,6 +438,7 @@ if __name__ == "__main__":
     plot_subcomm = ArgumentParser()
     subcommands.add_subcommand("plot", plot_subcomm)
     eval_subcomm = ArgumentParser()
+    eval_subcomm.add_argument("--out_file", type=str, default='out/results/result.h5')
     subcommands.add_subcommand("eval", eval_subcomm)
     args = parser.parse_args()
     init = parser.instantiate_classes(args)
@@ -614,7 +478,7 @@ if __name__ == "__main__":
         for c in init.app:
             plot(c)
     elif args.subcommand == "eval":
-        eval_(init.app)
+        eval_(init.app, init.eval.out_file)
     else:
         raise ValueError(f"Unknown subcommand {args.subcommand}")
 

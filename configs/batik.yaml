@@ -14,13 +14,20 @@ app:
         init_args:
           window_size: 0.5
           c: 1.0
+          channel_weight: [
+            1.07,
+            0.30,
+            0.45,
+            0.73
+          ]
       dataset:
         class_path: DataPiece
         init_args:
-          label: mozart_normal_sampling
+          # label: mozart_normal_sampling
+          label: batik
           cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/BatikPlaysMozart
           pieces:
-            - path: '/share/home/mathias/datasets/batik_plays_mozart/midi/kv332_2.mid'
+            - path: '/share/hel/home/mathias/datasets/batik_plays_mozart/midi/kv332_2.mid'
               # start_node: 149
               start_node: '1:44.75'
               # n_inpaint: 177

@@ -564,7 +564,7 @@ class DecoderEventsHandler(Handler):
         self,
         x : torch.LongTensor,
         metadata_dict : dict,
-        interpolation_time_points : torch.FloatTensor,
+        # interpolation_time_points : torch.FloatTensor,
         piece: Piece,
         sampling_config : SamplingConfig,
         experiment: Experiment,
@@ -575,6 +575,7 @@ class DecoderEventsHandler(Handler):
     ):
         weight_fn = experiment.weight
         interpolator_template=experiment.ic_curve
+        time_points_generator = experiment.time_points_generator
         # TODO add arguments to preprocess
         # print(f'Placeholder duration: {metadata_dict["placeholder_duration"]}')
         logger.debug(f'Placeholder duration: {metadata_dict["placeholder_duration"]}')
@@ -598,7 +599,7 @@ class DecoderEventsHandler(Handler):
             timepoints_tok_template, ic_tok_template, entr_tok_template = self.compute_token_onsets(
                 x=metadata_dict['original_sequence'],
                 metadata_dict=metadata_dict
-                )
+            )
             # TODO: Should not necessarily be the case, but for now we assign events to the first timepoint
             timepoints_tok_template = timepoints_tok_template[:,None].repeat(1, self.num_channels_target)
             if experiment.match_metric == 'ic':
@@ -639,7 +640,7 @@ class DecoderEventsHandler(Handler):
         # warn('Next two lines only for debugging purposes...')
         # batch_indices = torch.tensor([0,0])
         # event_indices = torch.tensor([decoding_start_event, decoding_start_event])
-        timepoint_idx = 0
+        # timepoint_idx = 0
         first_time_expand = True
         best_index = 0
         def ic_curve_dev(ic_int, ic_int_temp):
@@ -650,7 +651,9 @@ class DecoderEventsHandler(Handler):
             # event_index corresponds to the position of the token BEING generated
             # for event_index in range(decoding_start_event, num_events):
             rank = int(os.environ['RANK']) if 'RANK' in os.environ else 0
-            with tqdm(total=len(interpolation_time_points), position=rank+2, desc=f'Sampling rank: {rank}', leave=False) as pbar:
+            # TODO: change to (quantized) placeholder dir and the (quantized) gen dur
+            # with tqdm(total=len(interpolation_time_points), position=rank+2, desc=f'Sampling rank: {rank}', leave=False) as pbar:
+            with tqdm(total=time_points_generator.progress()[1], position=rank+2, desc=f'Sampling rank: {rank}', leave=False, unit='s') as pbar:
                 while True:
                     if first_time_expand:
                         # NOTE indices the sequences which did not yet exceed the timepoint prune limit
@@ -781,6 +784,7 @@ class DecoderEventsHandler(Handler):
                                         ]
                                         shift = 0.0 if shift == 'END' else shift
                                         generated_duration[batch_index, event_index] = generated_duration[batch_index, event_index - 1] + shift
+                                        exceeded = time_points_generator.update_is_exceeded(generated_duration[batch_index, event_index], batch_index)
                                         if event_index == x.size(1) - 1:
                                             # print("End of decoding due to reaching last sequence index")
                                             # print(
@@ -799,7 +803,8 @@ class DecoderEventsHandler(Handler):
                                             # )
                                             logger.debug('End of decoding due to the generation > than placeholder duration.\nExcess: {generated_duration[batch_index, event_index] - placeholder_duration}')
                                             done[batch_index, channel_index] = True
-                                        elif generated_duration[batch_index, event_index] < interpolation_time_points[timepoint_idx]:
+                                        # elif generated_duration[batch_index, event_index] < interpolation_time_points[timepoint_idx]:
+                                        elif not exceeded:
                                             unexceeded_timepoint.append(batch_index)
                         # print(f"events time: {time.time()-start_time}")
                         event_indices[batch_indices] += 1    
@@ -822,13 +827,17 @@ class DecoderEventsHandler(Handler):
                         metric = metric_list,
                         weight_fn = weight_fn,
                     )
-                    ts = interpolation_time_points[timepoint_idx:timepoint_idx+1]
-                    int_time = interpolator(ts)
+                    # ts = interpolation_time_points[timepoint_idx:timepoint_idx+1]
+                    # NOTE: We pick out the end-points for the current time-step and the next and split that in a smaller resolutions
+                    ts = time_points_generator.get_eval_points()
+                    # raise NotImplementedError('ts should be a list of tensors, where each tensor is the timepoints for a given sequence.')
+                    int_time = interpolator(ts).mean(dim=1, keepdims=True)
                     int_time_temp = interpolator_template(ts)
                     abs_diffs = ic_curve_dev(int_time, int_time_temp).sum(dim=1)
                     _, best_index_all = abs_diffs.min(dim=0)
                     # TODO: remove the termination from here to reduce spaghetti code
-                    if done.any(-1).all() or timepoint_idx == len(interpolation_time_points) - 1:
+                    # if done.any(-1).all() or timepoint_idx == len(interpolation_time_points) - 1:
+                    if done.any(-1).all() or time_points_generator.done():
                         decoding_end = event_indices[best_index_all].item()
                         # NOTE: to allign with the decoding_end which is pointing to the end token... 
                         decoding_end +=1
@@ -853,12 +862,15 @@ class DecoderEventsHandler(Handler):
                     # warn("while do until it's above the threshold")
                     # TODO: we could do something like rejection sampling, or use some heuristic search.
                     # logger.warning("while do until it's above the threshold")
-                    timepoint_idx += 1
+                    time_points_generator.update_step(best_index_all)
+                    # timepoint_idx += 1
                     # NOTE: for some reason as soon as we get to here, it starts to be slow.
                     # its likely to be caused by cache misses.
                     # answ : no speedup is due to reducing batch index, such that fewer and fewer samples are computed...
                     # print(f"interpolate: {time.time()-start_time}")
-                    pbar.update()
+                    # pbar.update()
+                    pbar.n = time_points_generator.progress()[0]
+                    pbar.refresh()
                     # if timepoint_idx == len(interpolation_time_points):
         # num_event_generated = decoding_end - decoding_start_event
 
@@ -869,6 +881,7 @@ class DecoderEventsHandler(Handler):
         # generated_region = x[first_index, decoding_start_event:decoding_end][None].cpu()
         # # TODO return everything on GPU
         # return x[first_index].cpu(), generated_region, decoding_end, num_event_generated, done
+        interpolation_time_points = time_points_generator.get_all_eval_points()
         ic_int_temp = interpolator_template(interpolation_time_points)[0]
         temp = ICRes(
             tok = original_sequence[0],
@@ -876,7 +889,7 @@ class DecoderEventsHandler(Handler):
             entr_tok = entr_tok_template,
             timepoints = timepoints_tok_template,
             ic_int = ic_int_temp,
-            timepoints_int = interpolation_time_points,
+            timepoints_int = interpolation_time_points[0],
             decoding_end=template_decoding_end,
             piece = piece
         )
@@ -890,7 +903,7 @@ class DecoderEventsHandler(Handler):
             entr_tok = entr_gen,
             timepoints = ic_times_list[best_index_all],
             ic_int = ic_int_gen,
-            timepoints_int = interpolation_time_points,
+            timepoints_int = interpolation_time_points[0],
             decoding_end=decoding_end,
             piece = piece,
             ic_dev = ic_curve_dev(ic_int_gen, ic_int_temp)

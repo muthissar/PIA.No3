@@ -59,19 +59,98 @@ class Piecewise(DrawnICCurve):
         return torch.tensor(np.stack([np.piecewise(t, conditions, self._ics[:,i]) for i in range(self._ics.shape[1])],axis=-1)[None])
 
 
-@dataclass
-class TimepointsGenerator(Callable[[torch.FloatTensor, dict], torch.FloatTensor]):
-    # interface for extracting the timepoints for which the IC needs to be computed
-    def __call__(self, piece: torch.LongTensor, metadata_dict: dict) -> torch.FloatTensor:
+class TimepointsGenerator:
+    def initialize(self, placholder_duration : float):
         raise NotImplementedError
-
+    def update_is_exceeded(self, t : torch.FloatTensor, idx : int) -> bool:
+        raise NotImplementedError
+    def done(self) -> bool:
+        raise NotImplementedError
+    def update_step(self, idx :int) -> None:
+        raise NotImplementedError
+    def progress(self) -> Tuple[int, int]:
+        raise NotImplementedError
+    def get_eval_points(self):
+        raise NotImplementedError
+    def get_all_eval_points(self):
+        raise NotImplementedError
+# TODO: this is actually an iterator'(ish) thing
 @dataclass
 class FixedStepTimepoints(TimepointsGenerator):
     step : float
-    def __call__(self, piece: torch.LongTensor, metadata_dict: dict) -> torch.FloatTensor:
-        placeholder_duration = metadata_dict['placeholder_duration'].item()
-        return torch.arange(0, placeholder_duration, self.step)
-    
+    eval_step: float
+    def __post_init__(self):
+        # super().__post_init__()
+        assert (self.step / self.eval_step).is_integer()
+    def initialize(self, placholder_duration : float):
+        self.current_step = 0   
+        self.placeholder_duration = placholder_duration
+    def update_is_exceeded(self, t : torch.FloatTensor, idx : int) -> bool:
+        '''
+        Times
+        '''
+        return t >= self.current_step * self.step
+    def done(self) -> bool:
+        return self.current_step * self.step >= self.placeholder_duration
+    def update_step(self, idx :int) -> None:
+        self.current_step += 1
+    def progress(self) -> Tuple[int, int]:
+        '''
+        Returns the (rounded) current number of secs generated and the total number of secs to be generated
+        '''
+        return round(self.current_step * self.step), round(self.placeholder_duration)
+    def get_eval_points(self):
+        if self.current_step == 0:
+            ts = torch.tensor([0.0])
+        else:
+            ts = torch.arange((self.current_step-1) * self.step, self.current_step * self.step, self.eval_step)
+        return ts[None]
+    def get_all_eval_points(self):
+        return torch.arange(0, self.placeholder_duration, self.eval_step)[None]
+        
+@dataclass
+class SingleNoteTimepoints(TimepointsGenerator):
+    # def __post_init__(self):
+    #     # assert (self.step / self.eval_step).is_integer()
+    #     self.best_times = [0.0]
+    k_traces : int
+    def initialize(self, placholder_duration : float):
+        # self.current_time = 0.0
+        self.placeholder_duration = placholder_duration
+        # self.past_time_traces =  torch.zeros(self.k_traces)
+        # self.current_time_traces =  torch.zeros(self.k_traces)
+        self.next_time_traces = torch.zeros(self.k_traces)
+        self.best_times = [0.0]
+    def update_is_exceeded(self, t : torch.FloatTensor, idx : int) -> bool:
+        '''
+        Times
+        '''
+        # self.current_time_traces[idx] = self.next_time_traces[idx]
+        # TODO: the ics of shift should be set on the next note...
+        self.next_time_traces[idx] = t
+        return True
+    def done(self) -> bool:
+        return len(self.best_times)>0 and self.best_times[-1] >= self.placeholder_duration
+    def update_step(self, idx : int) -> None:
+        # self.best_times.append(t.item())
+        self.best_times.append(self.next_time_traces[idx].item())
+        # self.time_traces = []
+    def progress(self) -> Tuple[int, int]:
+        '''
+        Returns the (rounded) current number of secs generated and the total number of secs to be generated
+        '''
+        return round(self.best_times[-1] if len(self.best_times) else 0.), round(self.placeholder_duration)
+    def get_eval_points(self):
+        # if len(self.best_times) == 0:
+        #     ts = torch.zeros(self.k_traces, 1)
+        # else:
+        #     ts = torch.tensor(self.time_traces)[:, None]
+        # ts = self.current_time_traces[:, None]
+        ts = torch.tensor(self.best_times[-1])[None, None]
+        return ts
+    def get_all_eval_points(self):
+        # return torch.arange(0, self.placeholder_duration, self.eval_step)
+        return torch.tensor(self.best_times)[None]
 
 
 
@@ -88,12 +167,16 @@ class Interpolator(ICCurve):
         assert self.metric_times.dim() == 4 and self.metric.dim() == 3 # bz, tokens, channels, (t=1?)
 
     def __call__(self, t : torch.FloatTensor) -> torch.FloatTensor:
+        assert t.dim() == 2 # bz, t
         #time_diffs = t[None, :, None] - self.ic_times[:, None]
-        time_diffs = einops.rearrange(t, '(bz tok chan t) -> bz tok chan t', bz=1, chan=1, tok=1) - self.metric_times
+        # time_diffs = einops.rearrange(t, '(bz tok chan t) -> bz tok chan t', bz=1, chan=1, tok=1) - self.metric_times
+        time_diffs = t[:, None, None] - self.metric_times
         w = self.weight_fn(time_diffs)
         w[time_diffs <.0] = 0.
         # NOTE: the ic padding cancels automatically.
-        return einops.einsum(w, self.metric, 'bz tok chan t, bz tok chan -> bz t chan')
+        
+        metric = self.metric.expand(w.shape[0], *self.metric.shape[1:])
+        return einops.einsum(w, metric, 'bz tok chan t, bz tok chan -> bz t chan')
 
 @dataclass
 class Weight(Callable[[torch.FloatTensor], torch.FloatTensor]):

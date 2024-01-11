@@ -34,7 +34,7 @@ model_dir = 'models/piano_event_performer_2021-10-01_16:03:06'
         # logging.getLogger()
 
 
-def main(c : Config, device='cpu'):
+def gen(c : Config, device='cpu'):
     logger = multiprocessing.get_logger()
     # config =  importlib.import_module('CIA.configs.piarceiverStack').config
     # NOTE: override configuration
@@ -144,7 +144,10 @@ def main(c : Config, device='cpu'):
                 n_inpaint_ = n_inpaint
             x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=n_inpaint_)
             placeholder_duration = metadata_dict['placeholder_duration'].item()
-            ts = c.experiment.time_points_generator(x, metadata_dict)
+            # ts = c.experiment.time_points_generator(x, metadata_dict)
+            # TODO: jsonargparse hack since placeholder_duration is not available at initialization time.
+            c.experiment.time_points_generator.initialize(placeholder_duration)
+            
             # TODO: ugly to check like this. Alternatively we could require that
             # the times are always relative. However, would be problematic for matching,
             # since the absolute time differences are important for the scaling.
@@ -205,7 +208,7 @@ def main(c : Config, device='cpu'):
                 gen
             ) = decoder_handler.inpaint_ic_curve(
                 x=x.clone(),
-                interpolation_time_points=ts,
+                # interpolation_time_points=ts,
                 sampling_config=c.sampling_config,
                 experiment=c.experiment,
                 metadata_dict=metadata_dict,
@@ -425,6 +428,7 @@ def plot(c : Config):
 
 if __name__ == "__main__":
     parser = ArgumentParser(
+        parser_mode="omegaconf"
         # default_config_files=['configs/config.yaml']
     )
     # parser.add_argument("--app", type=Config, nargs='*')  
@@ -433,8 +437,8 @@ if __name__ == "__main__":
     # NOTE: needed for torch.distributed.launch
     parser.add_argument("--local_rank", type=int, default=None)
     subcommands = parser.add_subcommands()
-    main_subcomm = ArgumentParser()
-    subcommands.add_subcommand("main", main_subcomm)
+    gen_subcomm = ArgumentParser()
+    subcommands.add_subcommand("gen", gen_subcomm)
     plot_subcomm = ArgumentParser()
     subcommands.add_subcommand("plot", plot_subcomm)
     eval_subcomm = ArgumentParser()
@@ -442,7 +446,7 @@ if __name__ == "__main__":
     subcommands.add_subcommand("eval", eval_subcomm)
     args = parser.parse_args()
     init = parser.instantiate_classes(args)
-    if args.subcommand == 'main':
+    if args.subcommand == 'gen':
         if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
             rank = int(os.environ["RANK"])
             world_size = int(os.environ["WORLD_SIZE"])
@@ -467,7 +471,7 @@ if __name__ == "__main__":
                 args_exp.app = [args.app[i]]
                 parser.save(args_exp, dir.joinpath('config.yaml'), overwrite=True)
             print(f'Experiment: {c.experiment}\n Sampling Config: {c.sampling_config}')
-            main(c, device=device)
+            gen(c, device=device)
             # NOTE: allow the processes to finish before plotting
             # if torch.distributed.is_initialized():
             #     torch.distributed.barrier()

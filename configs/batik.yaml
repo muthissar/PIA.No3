@@ -1,6 +1,6 @@
 app:
   - sampling_config:
-      k_traces: 16
+      k_traces: 4
       temperature: 1.0
     samples_per_template: 4
     logging: DEBUG  
@@ -9,6 +9,11 @@ app:
         class_path: CIA.ic.FixedStepTimepoints
         init_args:
           step: 0.5
+          eval_step: 0.05
+      # time_points_generator: 
+      #   class_path: CIA.ic.SingleNoteTimepoints
+      #   init_args:
+      #     k_traces: ${app[0].sampling_config.k_traces}
       weight:
         class_path: CIA.ic.MovingAverage
         init_args:

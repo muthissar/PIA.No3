@@ -113,7 +113,7 @@ class SingleNoteTimepoints(TimepointsGenerator):
     # def __post_init__(self):
     #     # assert (self.step / self.eval_step).is_integer()
     #     self.best_times = [0.0]
-    k_traces : int
+    k_traces : int = field(repr=False)
     def initialize(self, placholder_duration : float):
         # self.current_time = 0.0
         self.placeholder_duration = placholder_duration

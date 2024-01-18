@@ -1,17 +1,19 @@
 import copy
 from pathlib import Path
 from typing import List
+import einops
 import torch
 import os
 
 import tqdm
-from CIA.dataset_managers.piano_midi_dataset import PAD_SYMBOL
+from CIA.dataloaders.piano_dataloader import PianoDataloaderGenerator
+from CIA.dataset_managers.piano_midi_dataset import PAD_SYMBOL, PianoMidiDataset
 from CIA.getters import get_handler, get_data_processor, \
     get_dataloader_generator, get_decoder, get_positional_embedding,\
     get_sos_embedding
 import time
 import importlib
-from CIA.ic import DrawnICCurve
+from CIA.ic import DrawnICCurve, ICRes
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
 from CIA.utils import get_free_port
@@ -20,7 +22,6 @@ import numpy as np
 from jsonargparse import ActionConfigFile, ArgumentParser
 import multiprocessing
 from ic.app import Config
-
 from ic.eval_ import eval_
 from ic.plot import plot
 
@@ -41,9 +42,9 @@ def gen(c : Config, device='cpu'):
         piece_folder = c.out.joinpath(piece_name)
         piece_folder.mkdir(exist_ok=True, parents=True)
         for i in tqdm.tqdm(np.arange(rank, c.samples_per_template, world_size), desc='sample pr piece', disable=rank != 0, position=1, leave=False):
-            file_folder = piece_folder.joinpath(f'{i}')
-            file_folder.mkdir(exist_ok=True, parents=True)
-            gen_file = file_folder.joinpath(f'ic.pt')
+            gen_folder = piece_folder.joinpath(f'{i}')
+            gen_folder.mkdir(exist_ok=True, parents=True)
+            gen_file = gen_folder.joinpath(f'ic.pt')
             if gen_file.exists():
                 continue
             if isinstance(n_inpaint, float):
@@ -139,11 +140,73 @@ def gen(c : Config, device='cpu'):
                 # num_max_generated_events=num_max_generated_events
                 num_max_generated_events=None
             )
-            gen.write(gen_file)
-            if i == 0 and rank == 0:
-                file_folder = piece_folder.joinpath('temp')
-                file_folder.mkdir(exist_ok=True, parents=True)
-                temp.write(file_folder.joinpath(f'ic.pt'))
+
+            
+            template_folder = piece_folder.joinpath('temp')
+            template_folder.mkdir(exist_ok=True, parents=True)
+                
+            # if write_temp:
+            #     # temp.write(file_folder.joinpath(f'ic.pt'))
+            #     # if temp_midi.exists():
+            #     #     continue
+            before, after = post_process_temp(
+                dataloader_generator, 
+                data_processor,
+                template_folder,
+                temp,
+                write_template= i == 0 and rank == 0
+            )
+            # gen_folder = piece_folder.joinpath(str('temp'))
+            # gen_folder.mkdir(exist_ok=True, parents=True)
+            decoding_start = data_processor.num_events_after+data_processor.num_events_before+2
+    
+            post_process_gen(dataloader_generator, before, after, gen_folder, gen, decoding_start)
+            
+            
+def post_process_temp(
+        dataloader_generator : PianoDataloaderGenerator,
+        data_processor : DataProcessor,
+        file_folder : Path,
+        res_temp : ICRes,
+        write_template = True
+    ):
+        decoding_start = data_processor.num_events_after + data_processor.num_events_before+2
+        ds : PianoMidiDataset = dataloader_generator.dataset
+        num_middle_tokens = res_temp.decoding_end - 1 - (data_processor.num_events_after+data_processor.num_events_before+2)
+        if res_temp.piece is not None:
+            sequence = ds.process_score(res_temp.piece.path)
+            sequence = ds.tokenize(sequence)
+            sequence = torch.tensor([sequence[e] for e in dataloader_generator.features])
+            sequence = einops.rearrange(sequence, 'f n -> n f')
+            before = sequence[:data_processor.num_events_before+res_temp.piece.start_node]
+            after = sequence[res_temp.piece.start_node+data_processor.num_events_before+num_middle_tokens:]
+        else:
+            before = res_temp.tok[:data_processor.num_events_before]
+            after = res_temp.tok[data_processor.num_events_before+1: decoding_start-1]
+            middle_tokens_temp = res_temp.tok[decoding_start:res_temp.decoding_end-1]
+            sequence = torch.cat([before, middle_tokens_temp, after], axis=0)
+        # shift_to_time = dataloader_generator.dataset.index2value['time_shift']        
+        # inpaint_time, times_tok, times_int_summed, times_int = calculate_times(shift_to_time, decoding_start, before, result)
+
+        
+        if write_template:
+            res_temp.write(file_folder.joinpath(f'ic.pt'))
+            temp_midi = file_folder.joinpath(f'song.mid')
+            dataloader_generator.write(sequence, file_folder.joinpath(temp_midi.stem))
+        return before, after
+def post_process_gen(
+        dataloader_generator : PianoDataloaderGenerator,
+        before : torch.Tensor,
+        after : torch.Tensor,
+        gen_folder : Path,
+        res_gen : ICRes,
+        decoding_start : int
+        ):
+    middle_tokens_gen = res_gen.tok[decoding_start:res_gen.decoding_end-1]
+    s = torch.cat([before, middle_tokens_gen, after], axis=0)
+    gen_midi = gen_folder.joinpath(f'song.mid')
+    dataloader_generator.write(s, gen_midi.parent.joinpath(gen_midi.stem))
+    res_gen.write(gen_folder.joinpath(f'ic.pt'))
 
 def load_pia(device, skip_model=False):
     config = importlib.import_module('.config_autoreg', f'{model_dir.replace("/", ".")}').config

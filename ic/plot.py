@@ -24,7 +24,7 @@ def express_to_suplot(fig_plotly, explot, row, col):
 
 def plot(c : Config,
         #  dataloader_generator : PianoDataloaderGenerator,
-          data_processor : DataProcessor
+        #   data_processor : DataProcessor
         ):
     # TODO: change all naming to metric
     if not isinstance(c.experiment.dataset, DataPiece):
@@ -47,35 +47,35 @@ def plot(c : Config,
     for temp_file in [f for f in c.out.rglob('*/temp/ic.pt')]:
         song_dir = temp_file.parent.parent
         res_temp = ICRes.load(p=temp_file)
-        num_middle_tokens = res_temp.decoding_end-1 - (data_processor.num_events_after+data_processor.num_events_before+2)
+        # num_middle_tokens = res_temp.decoding_end - 1 - (data_processor.num_events_after+data_processor.num_events_before+2)
         temp_midi = temp_file.parent.joinpath(f'song.mid')
-        if temp_midi.exists():
-            continue
-        ds : PianoMidiDataset = dataloader_generator.dataset
-        decoding_start = data_processor.num_events_after+data_processor.num_events_before+2
-        if res_temp.piece is not None:
-            sequence = ds.process_score(res_temp.piece.path)
-            sequence = ds.tokenize(sequence)
-            sequence = torch.tensor([sequence[e] for e in dataloader_generator.features])
-            sequence = einops.rearrange(sequence, 'f n -> n f')
-            before = sequence[:data_processor.num_events_before+res_temp.piece.start_node]
-            after = sequence[res_temp.piece.start_node+data_processor.num_events_before+num_middle_tokens:]
-            dataloader_generator.write(sequence, temp_midi.parent.joinpath(temp_midi.stem))
-        else:
-            before = res_temp.tok[:data_processor.num_events_before]
-            after = res_temp.tok[data_processor.num_events_before+1: decoding_start-1]
-            middle_tokens_temp = res_temp.tok[decoding_start:res_temp.decoding_end-1]
-            sequence = torch.cat([before, middle_tokens_temp, after], axis=0)
-            dataloader_generator.write(sequence, temp_midi.parent.joinpath(temp_midi.stem))
+        # if temp_midi.exists():
+        #     continue
+        # ds : PianoMidiDataset = dataloader_generator.dataset
+        # decoding_start = data_processor.num_events_after+data_processor.num_events_before+2
+        # if res_temp.piece is not None:
+        #     sequence = ds.process_score(res_temp.piece.path)
+        #     sequence = ds.tokenize(sequence)
+        #     sequence = torch.tensor([sequence[e] for e in dataloader_generator.features])
+        #     sequence = einops.rearrange(sequence, 'f n -> n f')
+        #     before = sequence[:data_processor.num_events_before+res_temp.piece.start_node]
+        #     after = sequence[res_temp.piece.start_node+data_processor.num_events_before+num_middle_tokens:]
+        #     dataloader_generator.write(sequence, temp_midi.parent.joinpath(temp_midi.stem))
+        # else:
+        #     before = res_temp.tok[:data_processor.num_events_before]
+        #     after = res_temp.tok[data_processor.num_events_before+1: decoding_start-1]
+        #     middle_tokens_temp = res_temp.tok[decoding_start:res_temp.decoding_end-1]
+        #     sequence = torch.cat([before, middle_tokens_temp, after], axis=0)
+        #     dataloader_generator.write(sequence, temp_midi.parent.joinpath(temp_midi.stem))
         for sample in song_dir.rglob('*/ic.pt'):
             if sample == temp_file:
                 continue
             res_gen = ICRes.load(p=sample)
-            decoding_start = data_processor.num_events_after+data_processor.num_events_before+2
-            middle_tokens_gen = res_gen.tok[decoding_start:res_gen.decoding_end-1]
-            s = torch.cat([before, middle_tokens_gen, after], axis=0)
+            # decoding_start = data_processor.num_events_after+data_processor.num_events_before+2
+            # middle_tokens_gen = res_gen.tok[decoding_start:res_gen.decoding_end-1]
+            # s = torch.cat([before, middle_tokens_gen, after], axis=0)
             gen_midi = sample.parent.joinpath(f'song.mid')
-            dataloader_generator.write(s, gen_midi.parent.joinpath(gen_midi.stem))
+            # dataloader_generator.write(s, gen_midi.parent.joinpath(gen_midi.stem))
 
             midi_files = [temp_midi, gen_midi]
             results = [res_temp, res_gen]
@@ -87,12 +87,16 @@ def plot(c : Config,
             for i, (midi_file, result) in enumerate(zip(midi_files, results)):
                 midi = pretty_midi.PrettyMIDI(str(midi_file))
                 # NOTE: calculate timepoints
-                shift_to_time = dataloader_generator.dataset.index2value['time_shift']
+                times_tok = result.timepoints
+                times_int_summed = result.timepoints_int
+                times_int = None
+                inpaint_time = (times_tok[0], times_tok[-1])
                 inpaint_time, times_tok, times_int_summed, times_int = calculate_times(shift_to_time, decoding_start, before, result)
                 
                 # NOTE: colors
                 n_points = len(result.timepoints)
-                features = np.array(dataloader_generator.features)
+                # features = np.array(dataloader_generator.features)
+                features = result.ic_tok.shape[-1]
                 colors_tok, colors_int = get_colors(features, n_points, result)
                 
                 # NOTE: figure rows
@@ -182,6 +186,7 @@ def calculate_times(shift_to_time : dict, decoding_start : int, before: torch.Lo
                 ), dim=0).item()
     middle_tokens_gen = result.tok[decoding_start:result.decoding_end-1]
     shifts_middle_gen = [shift_to_time[tok[3].item()] for tok in middle_tokens_gen]
+    # NOTE: this seems just to be the same as the last token....
     time_middle = torch.sum(torch.tensor(
                     shifts_middle_gen
                 ), dim=0).item() + time_before
@@ -193,7 +198,7 @@ def calculate_times(shift_to_time : dict, decoding_start : int, before: torch.Lo
         times_tok = np.broadcast_to(np.array(result.timepoints + time_before )[:,None], (n_points, n_channels)).flatten()
 
     times_int_summed = result.timepoints_int + time_before
-                # NOTE: this should be handled differently
+    # NOTE: this should be handled differently
     times_int = np.broadcast_to(times_int_summed[:,None], result.ic_int.shape).flatten()
     inpaint_time = (time_before, time_middle)
     return inpaint_time, times_tok, times_int_summed, times_int

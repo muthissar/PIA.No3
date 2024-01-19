@@ -584,7 +584,6 @@ class DecoderEventsHandler(Handler):
         assert x.size(0) == 1
         index2value = self.dataloader_generator.dataset.index2value
         placeholder_duration = metadata_dict["placeholder_duration"].item()
-        # generated_duration = torch.zeros(sampling_config.k_traces, x.shape[1])
         generated_duration = torch.zeros(sampling_config.k_traces, *x.shape[1:])
         decoding_start_event = metadata_dict["decoding_start"]
         template_decoding_end = metadata_dict["decoding_end"].item()
@@ -593,13 +592,15 @@ class DecoderEventsHandler(Handler):
         x = x.detach().clone()
         # TODO: deprecate all instances of setting original_sequence
         # NOTE: this is only for the middle tokens!
+        warn('Refactor!')
+        onset_on_next_note = True                            
         if interpolator_template is None:
-            timepoints_tok_template, ic_tok_template, entr_tok_template = self.compute_token_onsets(
+            timepoints_tok_template, template_inpaint_end, ic_tok_template, entr_tok_template = self.compute_token_onsets(
                 x=metadata_dict['original_sequence'],
-                metadata_dict=metadata_dict
+                metadata_dict=metadata_dict,
+                onset_on_next_note = onset_on_next_note
             )
             # TODO: Should not necessarily be the case, but for now we assign events to the first timepoint
-            timepoints_tok_template = timepoints_tok_template[:,None].repeat(1, self.num_channels_target)
             if experiment.match_metric == 'ic':
                 metric_tok_template = ic_tok_template
             elif experiment.match_metric == 'typicality':
@@ -764,7 +765,6 @@ class DecoderEventsHandler(Handler):
                                     # placeholder_duration
                                     # TODO hardcoded channel index for timeshifts
                                     warn('Refactor!')
-                                    onset_on_next_note = True
                                     if channel_index != 3:
                                         if onset_on_next_note:
                                             generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index - 1, 3]
@@ -842,21 +842,25 @@ class DecoderEventsHandler(Handler):
             ic_int = ic_int_temp,
             timepoints_int = interpolation_time_points[0],
             decoding_end=template_decoding_end,
-            piece = piece
+            piece = piece,
+            inpaint_end = template_inpaint_end
         )
         ic_tok_gen = ics[best_index,decoding_start_event:decoding_end-1].cpu()
         entr_gen = entrs[best_index,decoding_start_event:decoding_end-1].cpu()
         ic_int_gen = interpolator(interpolation_time_points)[best_index_all]
+        tok_times = ic_times_list[best_index_all]
+        inpaint_end_gen = generated_duration[best_index_all][event_indices[best_index_all]][-1].item()
         gen = ICRes(
             tok = x[best_index_all].cpu(),
             ic_tok = ic_tok_gen,
             entr_tok = entr_gen,
-            timepoints = ic_times_list[best_index_all],
+            timepoints = tok_times,
             ic_int = ic_int_gen,
-            timepoints_int = interpolation_time_points[0],
+            timepoints_int = interpolation_time_points[0].clone(),
             decoding_end=decoding_end,
             piece = piece,
-            ic_dev = ic_curve_dev(ic_int_gen, ic_int_temp)
+            ic_dev = ic_curve_dev(ic_int_gen, ic_int_temp),
+            inpaint_end  = inpaint_end_gen,
         )
         return temp, gen
     @staticmethod
@@ -901,7 +905,7 @@ class DecoderEventsHandler(Handler):
     ):
         
 
-        unique_timepoint, cum_ics, entr = self.compute_token_onsets(x, metadata_dict)
+        unique_timepoint, _,  cum_ics, entr = self.compute_token_onsets(x, metadata_dict)
         integrator = functools.partial(self.integration, unique_timepoint=unique_timepoint, cum_ics=cum_ics)
         return integrator
         
@@ -909,12 +913,12 @@ class DecoderEventsHandler(Handler):
         self,
         x : torch.Tensor,
         metadata_dict : dict,
+        onset_on_next_note: bool = False,
         # match_original_onsets : Optional[Mapping[int, Any]] = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # TODO add arguments to preprocess
         self.eval()
         batch_size, num_events, _ = x.size()
-
         # TODO only works with batch_size=1 at present
         assert batch_size == 1
         with torch.no_grad():
@@ -943,10 +947,18 @@ class DecoderEventsHandler(Handler):
             middle_slice = slice(metadata_dict['decoding_start'], metadata_dict['decoding_end']-1)
             middle_tokens = x[0, middle_slice]
             # TODO: There's some small deviation between this calculation and the one obtained by simply using the cum
-            onsets = torch.cumsum(torch.tensor(
-                [0]+[self.dataloader_generator.dataset.index2value['time_shift'][tok[3].item()] for tok in middle_tokens]
-                , dtype=torch.float32), dim=0
-            )
+            # TODO: refactor to use class time mapper (see, also generated_duration in ic_inpaint)
+            shifts_cum = torch.cumsum(torch.tensor(
+                    [self.dataloader_generator.dataset.index2value['time_shift'][tok[3].item()] for tok in middle_tokens]
+                    , dtype=torch.float32), dim=0
+                )
+            shifts_cum_rolled = shifts_cum.roll(1)
+            shifts_cum_rolled[0] = 0.0
+            if onset_on_next_note:
+                onsets = torch.stack([shifts_cum_rolled, shifts_cum_rolled, shifts_cum_rolled, shifts_cum], 1)
+            else:
+                onsets = torch.stack([shifts_cum_rolled, shifts_cum_rolled, shifts_cum_rolled, shifts_cum_rolled], 1)
+            end = shifts_cum[-1]
             # TODO: check if this is what we want...
             ics_middle = ics[0, middle_slice]
             entrs_middle = entrs[0, middle_slice]
@@ -954,6 +966,5 @@ class DecoderEventsHandler(Handler):
 
 
             # unique_timepoint, cum_ics = unique_timepoints(onsets, ics_middle)
-            onsets = onsets[:-1]
             # TODO: remove batches everywhere because it's not working anyway
-            return onsets, ics_middle, entrs_middle
+            return onsets, end,  ics_middle, entrs_middle

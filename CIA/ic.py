@@ -186,18 +186,18 @@ class Weight(Callable[[torch.FloatTensor], torch.FloatTensor]):
 @dataclass
 class MovingAverage(Weight):
     window_size : float
-    c: Union[float, List[Union[float, str]]]
+    decay: Union[float, List[Union[float, str]]]
     channel_weight: Union[float, List[Union[float, str]]] = 1.
     def __post_init__(self):
-        if isinstance(self.c, List):
-            self.c = [float(c_) for c_ in self.c]
-        elif isinstance(self.c, float):
-            self.c = [self.c]
+        if isinstance(self.decay, List):
+            self.decay = [float(c_) for c_ in self.decay]
+        elif isinstance(self.decay, float):
+            self.decay = [self.decay]
         if isinstance(self.channel_weight, List):
             self.channel_weight = [float(a) for a in self.channel_weight]
         elif isinstance(self.channel_weight, float):
             self.channel_weight = [self.channel_weight]
-        self.c_ = torch.tensor(self.c)[None, None, :, None] # bz=1, tok=1, channels
+        self.c_ = torch.tensor(self.decay)[None, None, :, None] # bz=1, tok=1, channels
         self.cw = torch.tensor(self.channel_weight)[None, None, :, None] # bz=1, tok=1, channels
     def __call__(self, time_diffs : torch.FloatTensor) -> torch.Tensor:
         # NOTE: (bz, T, channels, tokens)
@@ -241,6 +241,7 @@ class ICRes:
     timepoints_int: torch.Tensor
     decoding_end: int
     piece: Piece
+    inpaint_end : float
     ic_dev: Optional[torch.Tensor] = None
     def write(self, p : Path):
         torch.save(obj=self, f=p)

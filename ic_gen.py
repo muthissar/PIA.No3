@@ -161,8 +161,6 @@ def gen(c : Config, device='cpu'):
             decoding_start = data_processor.num_events_after+data_processor.num_events_before+2
     
             post_process_gen(dataloader_generator, before, after, gen_folder, gen, decoding_start)
-            
-            
 def post_process_temp(
         dataloader_generator : PianoDataloaderGenerator,
         data_processor : DataProcessor,
@@ -185,9 +183,13 @@ def post_process_temp(
             after = res_temp.tok[data_processor.num_events_before+1: decoding_start-1]
             middle_tokens_temp = res_temp.tok[decoding_start:res_temp.decoding_end-1]
             sequence = torch.cat([before, middle_tokens_temp, after], axis=0)
-        # shift_to_time = dataloader_generator.dataset.index2value['time_shift']        
-        # inpaint_time, times_tok, times_int_summed, times_int = calculate_times(shift_to_time, decoding_start, before, result)
-
+        shift_to_time = dataloader_generator.dataset.index2value['time_shift']
+        time_before = torch.sum(torch.tensor(
+                [shift_to_time[tok[3].item()] for tok in before]
+            ), dim=0).item()
+        res_temp.timepoints += time_before
+        res_temp.timepoints_int += time_before
+        res_temp.inpaint_end += time_before
         
         if write_template:
             res_temp.write(file_folder.joinpath(f'ic.pt'))
@@ -201,11 +203,18 @@ def post_process_gen(
         gen_folder : Path,
         res_gen : ICRes,
         decoding_start : int
-        ):
+    ):
     middle_tokens_gen = res_gen.tok[decoding_start:res_gen.decoding_end-1]
     s = torch.cat([before, middle_tokens_gen, after], axis=0)
     gen_midi = gen_folder.joinpath(f'song.mid')
     dataloader_generator.write(s, gen_midi.parent.joinpath(gen_midi.stem))
+    shift_to_time = dataloader_generator.dataset.index2value['time_shift']
+    time_before = torch.sum(torch.tensor(
+        [shift_to_time[tok[3].item()] for tok in before]
+    ), dim=0).item()
+    res_gen.timepoints += time_before
+    res_gen.timepoints_int += time_before
+    res_gen.inpaint_end += time_before
     res_gen.write(gen_folder.joinpath(f'ic.pt'))
 
 def load_pia(device, skip_model=False):
@@ -356,7 +365,7 @@ if __name__ == "__main__":
     elif args.subcommand == "plot":
         dataloader_generator,data_processor,decoder_handler = load_pia(device='cpu', skip_model=True)
         for c in init.app:
-            plot(c, dataloader_generator=dataloader_generator, data_processor=data_processor)
+            plot(c)
     elif args.subcommand == "eval":
         eval_(init.app, init.eval.out_file)
     else:

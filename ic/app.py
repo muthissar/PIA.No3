@@ -1,3 +1,4 @@
+import hashlib
 from CIA.ic import Experiment, SamplingConfig
 
 
@@ -17,7 +18,9 @@ class Config:
     experiment: Experiment
     def __post_init__(self):
         # TODO: exp uniquely identifies where
-        args_str =  f'{slugify(str(self.experiment))}/{slugify(str(self.sampling_config))}'
+        exp_folder = hashlib.sha256(str(self.experiment).encode('utf-8')).hexdigest()
+        # exp_folder = slugify(str(self.experiment))
+        args_str =  f'{exp_folder}/{slugify(str(self.sampling_config))}'
         self.out = Path(f'out/{args_str}')
         self.out.mkdir(parents=True, exist_ok=True)
         numeric_level = getattr(logging, self.logging.upper(), None)

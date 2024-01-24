@@ -5,28 +5,51 @@ app:
     samples_per_template: 4
     logging: DEBUG  
     experiment:
-      time_points_generator:
-        class_path: CIA.ic.FixedStepTimepoints
-        init_args:
-          step: 0.5
-          eval_step: 0.05
-      # time_points_generator: 
-      #   class_path: CIA.ic.SingleNoteTimepoints
+      # Needs to be it's own class
+      onset_on_next_note: true
+      # time_points_generator:
+      #   class_path: CIA.ic.FixedStepTimepoints
       #   init_args:
-      #     k_traces: ${app[0].sampling_config.k_traces}
+      #     step: 0.5
+      #     eval_step: 0.05
+      time_points_generator: 
+        class_path: CIA.ic.SingleNoteTimepoints
+        init_args:
+          k_traces: ${app[0].sampling_config.k_traces}
       weight:
         class_path: CIA.ic.MovingAverage
         init_args:
           # window_size: 0.5
           # c: 0.0
-          window_size: 2.0
-          c: 1.0
+          window_size: 4.0
+          decay: 0.2
           channel_weight: [
             1.07,
-            0.30,
-            0.45,
+            # 0.30,
+            # 0.45,
+            0.0,
+            0.0,
             0.73
           ]
+      # ic_curve:
+      #   class_path: CIA.ic.LinearInterpolation
+      #   init_args:
+      #     relative_time: true
+      #     timepoints: [
+      #       0,
+      #     # 0.499,
+      #     # 0.5,
+      #     1.0]
+      #     ics: [
+      #       # [0, 0., 0., 0.],
+      #       # [25, 0., 0, 25.],
+      #       # [25, 0., 0, 25.],
+      #       # [0, 0., 0., 0.],
+      #       [18.75, 0, 0, 18.75],
+      #       [18.75, 0, 0, 18.75],
+      #       # [6.25, 0., 0, 6.25],
+      #       # [6.25, 0., 0, 6.25],
+      #   ]
       dataset:
         class_path: DataPiece
         init_args:
@@ -35,9 +58,9 @@ app:
           cache_path: /share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/BatikPlaysMozart
           pieces:
             - path: '/share/hel/home/mathias/datasets/batik_plays_mozart/midi/kv331_1.mid'
-              # start_node: 149
               start_node: '0:54.5'
-              # n_inpaint: 177
+              # NOTE: time deltas
               n_inpaint: '1:05.5'
+              end_window: '0:00.0'
 
           

@@ -1,9 +1,11 @@
+from pathlib import Path
+from bs4 import BeautifulSoup
 from CIA.data_processors.data_processor import DataProcessor
 from CIA.dataloaders.piano_dataloader import PianoDataloaderGenerator
 from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
 from CIA.ic import DataPiece, ICRes
 from ic.app import Config
-
+import soundfile as sf
 import einops
 import numpy as np
 import plotly.express as px
@@ -22,9 +24,7 @@ def express_to_suplot(fig_plotly, explot, row, col):
         fig_plotly.add_trace(trace, row=row, col=col)
 
 
-def plot(c : Config,
-         sr = 25
-        ):
+def plot(c : Config, sr : int = 25):
     # TODO: change all naming to metric
     if not isinstance(c.experiment.dataset, DataPiece):
         warn('Check implimentation, since it is not clear how to handle this case')
@@ -44,17 +44,28 @@ def plot(c : Config,
             metric_name = metric_name.capitalize()
             figs_pr_sample, fig_plotly = get_figure(metric_name)
             
-            
+            audio_files = []
             for i, (midi_file, result) in enumerate(zip(midi_files, results)):
                 midi = pretty_midi.PrettyMIDI(str(midi_file))
+                audio_sr = 44100
+                audio = midi.fluidsynth(fs=audio_sr)
+                audio_file = midi_file.parent.joinpath(f'song.mp3')
+                sf.write(file=audio_file, data=audio, samplerate=audio_sr)
+                audio_files.append(Path('..').joinpath(audio_file.relative_to(audio_file.parent.parent)))
                 # NOTE: calculate timepoints
-                times_tok = result.timepoints.flatten()
                 times_int_summed = result.timepoints_int.flatten()
                 times_int = np.broadcast_to(times_int_summed[:,None], result.ic_int.shape)
-                inpaint_time = (times_tok[0], times_tok[-1])
+                if result.timepoints is not None:
+                    times_tok = result.timepoints.flatten()
+                    n_toks = len(result.timepoints)
+                else:
+                    times_tok = None
+                    n_toks = 0
+                warn('hack, refactor this')
+                inpaint_time = (0, 10)
+                # inpaint_time = (times_tok[0], times_tok[-1])
                 
                 # NOTE: colors
-                n_toks = len(result.timepoints)
                 features = np.array(['pitch', 'velocity', 'duration', 'time_shift'])
                 n_int_points  = result.ic_int.shape[0]
                 colors_tok, colors_int = get_colors(features, n_toks, n_int_points)
@@ -88,25 +99,53 @@ def plot(c : Config,
             plot_metric_dev(res_gen, metric_name, fig_plotly, times_int_summed, metric_dev_fig_row)
             
             # NOTE update y-axis
-            # NOTE: 
-            metric_int_max = max([r.ic_int.max() for r in results])
-            metric_int_summed_max = max([r.ic_int.sum(-1).max() for r in results])
-            # cum_metric_list = []
-            # entrs_list = []
-            entrs_max = max([r.entr_tok.max() for r in results])
-            
-            # cum_metric_max = max(cum_metric_list)
-            cum_metric_max = max([r.ic_tok.max() for r in results])
-            # entrs_max = max(entrs_list)
             for i in range(2):
-                fig_plotly.update_yaxes(range=(0, entrs_max+1), row=entr_fig_row, col=1)
-                fig_plotly.update_yaxes(range=(0, cum_metric_max+1), row=metric_fig_row, col=1)
+                metric_int_max = max([r.ic_int.max() for r in results])
+                metric_int_summed_max = max([r.ic_int.sum(-1).max() for r in results])
+                if results[0].ic_tok is not None:
+                    entrs_max = max([r.entr_tok.max() for r in results])
+                    cum_metric_max = max([r.ic_tok.max() for r in results])
+                    fig_plotly.update_yaxes(range=(0, entrs_max+1), row=entr_fig_row, col=1)
+                    fig_plotly.update_yaxes(range=(0, cum_metric_max+1), row=metric_fig_row, col=1)
                 fig_plotly.update_yaxes(range=(0, metric_int_max+1), row=int_fig_row, col=1)
                 fig_plotly.update_yaxes(range=(0, metric_int_summed_max+1), row=int_summed_fig_row, col=1)
             fig_height = 2000
-            fig_plotly.update_layout(height=fig_height)
-            fig_plotly.write_html(sample.parent.joinpath(f'{metric_name}_curve.html'))
-
+            crop_end_time = 150
+            crop_start_time = 0
+            fig_plotly.update_xaxes(tickformat="%M:%S.%3f")
+            fig_plotly.update_layout(height=fig_height, xaxis=dict(range=[crop_start_time, crop_end_time]))
+            
+            # template = """
+            # <!DOCTYPE html>
+            # <html>
+            #     <head>
+            #         <meta charset="utf-8" />
+            #         <title>{{{{ title }}}}</title>
+            #         <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+            #     </head>
+            #     <body>
+            #         <audio controls>
+            #         <source src="{audio_files[0]}" type="audio/mpeg">
+            #         <source src="{audio_files[1]}" type="audio/mpeg">
+            #         Your browser does not support the audio element.
+            #         </audio>
+            #         {{{{ plotly_div }}}}
+            #         <p>My Custom Footer</p>
+            #     </body>
+            # </html>
+            # """
+            # fig_plotly.write_html(sample.parent.joinpath(f'{metric_name}_curve.html'), full_html=True, include_plotlyjs='cdn', template=template)
+            
+            html_file = sample.parent.joinpath(f'{metric_name}_curve.html')
+            # import io
+            # string_file = io.StringIO()
+            # fig_plotly.write_html(html_file)
+            html = fig_plotly.to_html()
+            soup = BeautifulSoup(html)
+            audio_elems = [soup.new_tag('audio', controls=True, src=audio_file) for audio_file in audio_files]
+            soup.div.insert_before(*audio_elems)
+            with open(html_file, 'w') as file:
+                file.write(soup.prettify())
 def get_figure(metric):
     figs_pr_sample = 5
     titles = [title + f" {type_}" for type_ in ['template', 'generated'] for title in (
@@ -127,7 +166,7 @@ def get_figure(metric):
         
     return figs_pr_sample,fig_plotly
 
-def plot_metric_dev(res_gen, metric_name, fig_plotly, times_int_summed, metric_dev_fig_row):
+def plot_metric_dev(res_gen : ICRes, metric_name, fig_plotly, times_int_summed, metric_dev_fig_row):
     metric_dev = res_gen.ic_dev
     metric_dev_mean = metric_dev.mean().item()
     express_to_suplot(fig_plotly, px.line(x=times_int_summed, y=metric_dev, line_shape='hv', labels=dict(x="Time", y=f"{metric_name} Deviation", color="Channel")), row=metric_dev_fig_row, col=1)
@@ -177,7 +216,7 @@ def plot_piano_roll(fig_plotly, image_row, sr, piano_roll, inpaint_time):
                     x=np.arange(0, end, 1/sr),
                 )
                 # TODO: this low level time calculation of tokens should not be here.
-
+    
     express_to_suplot(fig_plotly, image, row=image_row, col=1)
     fig_plotly.add_shape(
                     go.layout.Shape(
@@ -204,3 +243,4 @@ def plot_piano_roll(fig_plotly, image_row, sr, piano_roll, inpaint_time):
                     col=1
                 )
     fig_plotly.update_yaxes(range=pitch_range, row=image_row, col=1)
+    # fig_plotly.update_xaxes(hoverformat="%M:%S.%3f", row=image_row, col=1)

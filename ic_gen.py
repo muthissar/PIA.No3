@@ -38,7 +38,7 @@ def gen(c : Config, device='cpu'):
     # for piece in tqdm.tqdm(c.pieces, desc='Pieces completed', disable=rank != 0, position=0):
     # TODO: this is quite ugly, but how can it be done prettyer using jsonargparse?
     c.experiment.dataset.dataloader_generator = dataloader_generator
-    for original_x, piece_name, n_inpaint, piece in tqdm.tqdm(c.experiment.dataset, desc='Pieces completed', disable=rank != 0, position=0, leave=True):
+    for original_x, piece_name, n_inpaint, end_window, piece in tqdm.tqdm(c.experiment.dataset, desc='Pieces completed', disable=rank != 0, position=0, leave=True):
         piece_folder = c.out.joinpath(piece_name)
         piece_folder.mkdir(exist_ok=True, parents=True)
         for i in tqdm.tqdm(np.arange(rank, c.samples_per_template, world_size), desc='sample pr piece', disable=rank != 0, position=1, leave=False):
@@ -187,7 +187,8 @@ def post_process_temp(
         time_before = torch.sum(torch.tensor(
                 [shift_to_time[tok[3].item()] for tok in before]
             ), dim=0).item()
-        res_temp.timepoints += time_before
+        if res_temp.timepoints is not None:
+            res_temp.timepoints += time_before
         res_temp.timepoints_int += time_before
         res_temp.inpaint_end += time_before
         

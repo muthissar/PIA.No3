@@ -574,7 +574,7 @@ class DecoderEventsHandler(Handler):
         regenerate_first_ts=False,
     ):
         weight_fn = experiment.weight
-        interpolator_template=experiment.ic_curve
+        interpolator_template = experiment.ic_curve
         time_points_generator = experiment.time_points_generator
         # TODO add arguments to preprocess
         logger.debug(f'Placeholder duration: {metadata_dict["placeholder_duration"]}')
@@ -593,7 +593,7 @@ class DecoderEventsHandler(Handler):
         # TODO: deprecate all instances of setting original_sequence
         # NOTE: this is only for the middle tokens!
         warn('Refactor!')
-        onset_on_next_note = True                            
+        onset_on_next_note = experiment.onset_on_next_note                     
         if interpolator_template is None:
             timepoints_tok_template, template_inpaint_end, ic_tok_template, entr_tok_template = self.compute_token_onsets(
                 x=metadata_dict['original_sequence'],
@@ -616,6 +616,9 @@ class DecoderEventsHandler(Handler):
             timepoints_tok_template = None
             ic_tok_template = None
             entr_tok_template = None
+            # TODO: should this rather be part of time_points_generator?
+            # template_inpaint_end = interpolator_template.inpaint_end
+            template_inpaint_end = placeholder_duration
         # TODO: 'It does not make sense to limit the number of tokens that we can resample.')
         if num_max_generated_events is not None:
             num_events = min(
@@ -633,6 +636,7 @@ class DecoderEventsHandler(Handler):
         def ic_curve_dev(ic_int, ic_int_temp):
             # TODO: deprecate this is actually part of the weighting....
             # NOTE: for now we just compute the abs of the sum of all channels
+            # bz, T, channels
             return (ic_int.sum(-1) - ic_int_temp.sum(-1)).abs()
         with torch.no_grad():
             # event_index corresponds to the position of the token BEING generated
@@ -782,7 +786,7 @@ class DecoderEventsHandler(Handler):
                                             generated_duration[batch_index, event_index + 1, channel_index] = generated_duration[batch_index, event_index, channel_index] + shift
                                         warn('Check if next two uses of generated_duration are correct to use channel_index=3? ')
                                         exceeded = time_points_generator.update_is_exceeded(generated_duration[batch_index, event_index, channel_index], batch_index)
-                                        if event_index == x.size(1) - 1:
+                                        if event_index == x.size(1) - 2:
                                             logger.debug(f"End of decoding due to reaching last sequence index.\nMissing: {generated_duration[batch_index, event_index] - placeholder_duration}")
                                             done[batch_index, channel_index] = True
                                         elif generated_duration[batch_index, event_index, channel_index] > placeholder_duration:
@@ -808,9 +812,12 @@ class DecoderEventsHandler(Handler):
                     )
                     # NOTE: We pick out the end-points for the current time-step and the next and split that in a smaller resolutions
                     ts = time_points_generator.get_eval_points()
-                    int_time = interpolator(ts).mean(dim=1, keepdims=True)
+                    # int_time = interpolator(ts).mean(dim=1, keepdims=True)
+                    int_time = interpolator(ts)
                     int_time_temp = interpolator_template(ts)
-                    abs_diffs = ic_curve_dev(int_time, int_time_temp).sum(dim=1)
+                    abs_diffs = ic_curve_dev(int_time, int_time_temp)
+                    # mean over T, to be in sensitive to number of points
+                    abs_diffs = abs_diffs.mean(-1)
                     _, best_index_all = abs_diffs.min(dim=0)
                     # TODO: remove the termination from here to reduce spaghetti code
                     if done.any(-1).all() or time_points_generator.done():
@@ -831,6 +838,7 @@ class DecoderEventsHandler(Handler):
                     # TODO: we could do something like rejection sampling, or use some heuristic search.
                     time_points_generator.update_step(best_index_all)
                     pbar.n = time_points_generator.progress()[0]
+                    pbar.set_postfix({'ic_dev': abs_diffs[best_index_all].item()})
                     pbar.refresh()
         interpolation_time_points = time_points_generator.get_all_eval_points()
         ic_int_temp = interpolator_template(interpolation_time_points)[0]
@@ -849,7 +857,8 @@ class DecoderEventsHandler(Handler):
         entr_gen = entrs[best_index,decoding_start_event:decoding_end-1].cpu()
         ic_int_gen = interpolator(interpolation_time_points)[best_index_all]
         tok_times = ic_times_list[best_index_all]
-        inpaint_end_gen = generated_duration[best_index_all][event_indices[best_index_all]][-1].item()
+        # inpaint_end_gen = generated_duration[best_index_all][event_indices[best_index_all]][-1].item()
+        inpaint_end_gen = generated_duration[best_index_all][event_indices[best_index_all]].max().item()
         gen = ICRes(
             tok = x[best_index_all].cpu(),
             ic_tok = ic_tok_gen,

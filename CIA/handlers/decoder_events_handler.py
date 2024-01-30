@@ -6,7 +6,7 @@ from CIA.dataset_managers.piano_midi_dataset import END_SYMBOL, PAD_SYMBOL, STAR
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 # from CIA.ic import gen_interpolate
-from CIA.ic import Experiment, ICRes, Interpolator, Piece, SamplingConfig, numerial_stable_softmax_entr
+from CIA.ic import Experiment, ICRes, Interpolator, Piece, SamplingConfig, SingleNoteTimepoints, numerial_stable_softmax_entr
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,
@@ -706,8 +706,18 @@ class DecoderEventsHandler(Handler):
                             # TODO: change using ic_times_list
                             # ic_current = torch.tensor(weights.size(0) * [2.0])
                             # t = app_ent(logits=weights, entr_target=ic_current)
-
-                            logits = weights / sampling_config.temperature
+                            # t = sampling_config.temperature
+                            # TODO: hard coded switch to allow for testing out different temperatures, 
+                            # but keeping the original functionality when temperature==1.0
+                            if sampling_config.temperature != 1.0:
+                                if channel_index == 0:
+                                    t = 4
+                                if channel_index == 3:
+                                    # t = 0.5
+                                    t = 1.0
+                            else:
+                                t = 1.0
+                            logits = weights / t
 
                             # Filter logits
                             # filtered_logits = []
@@ -759,7 +769,9 @@ class DecoderEventsHandler(Handler):
                                         # logger.warn('Find out if end can happen accross different channels?')
                                         # NOTE if a sequence is done, we keep it's interpolation and continue
                                         # computing the rest of the timepoints
-                                        done[batch_index, channel_index] = True
+                                        if  not isinstance(time_points_generator, SingleNoteTimepoints):
+                                            warn('dirty hack  to account for the fact that the note strategy never really finish...')
+                                            done[batch_index, channel_index] = True
                                         # NOTE: avoid end token to be written in the middle tokens
                                         event_indices[batch_index] -= 1
                                         logger.info("End of decoding due to END symbol generation")
@@ -769,6 +781,9 @@ class DecoderEventsHandler(Handler):
                                     # placeholder_duration
                                     # TODO hardcoded channel index for timeshifts
                                     warn('Refactor!')
+                                    # NOTE: It seems that when the length of the generation is close to, but smaller than the  placeholder duration, 
+                                    # then the model keeps on generating notes 0 time_shifts... Therefore allow to undershoot placeholder duration.
+                                    # tol_placeholder_duration = 2e-1 
                                     if channel_index != 3:
                                         if onset_on_next_note:
                                             generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index - 1, 3]
@@ -789,7 +804,7 @@ class DecoderEventsHandler(Handler):
                                         if event_index == x.size(1) - 2:
                                             logger.debug(f"End of decoding due to reaching last sequence index.\nMissing: {generated_duration[batch_index, event_index] - placeholder_duration}")
                                             done[batch_index, channel_index] = True
-                                        elif generated_duration[batch_index, event_index, channel_index] > placeholder_duration:
+                                        elif generated_duration[batch_index, event_index, channel_index] > placeholder_duration - time_points_generator.tol_placeholder_duration:
                                             logger.debug('End of decoding due to the generation > than placeholder duration.\nExcess: {generated_duration[batch_index, event_index] - placeholder_duration}')
                                             done[batch_index, channel_index] = True
                                         elif not exceeded:
@@ -811,6 +826,7 @@ class DecoderEventsHandler(Handler):
                         weight_fn = weight_fn,
                     )
                     # NOTE: We pick out the end-points for the current time-step and the next and split that in a smaller resolutions
+                    # raise NotImplementedError('Here there\'s likely a bug, since we always return the "previous" timestep')
                     ts = time_points_generator.get_eval_points()
                     # int_time = interpolator(ts).mean(dim=1, keepdims=True)
                     int_time = interpolator(ts)
@@ -820,11 +836,17 @@ class DecoderEventsHandler(Handler):
                     abs_diffs = abs_diffs.mean(-1)
                     _, best_index_all = abs_diffs.min(dim=0)
                     # TODO: remove the termination from here to reduce spaghetti code
-                    if done.any(-1).all() or time_points_generator.done():
+                    ic_dev = abs_diffs[best_index_all].item()
+                    if done.any(-1).all() or time_points_generator.done()\
+                        :
+                        # or isinstance(time_points_generator, SingleNoteTimepoints) and done.any(-1).any() :
+                        # if isinstance(time_points_generator, SingleNoteTimepoints) and done.any(-1).any() :
+                        #     warn('Dirty hack related to the problem of single note not all finishing (generating empty notes in the end)')
                         decoding_end = event_indices[best_index_all].item()
                         # NOTE: to allign with the decoding_end which is pointing to the end token... 
                         decoding_end +=1
                         break
+                    # NOTE: keep the done sequences only in the case where it's better than any other   ...
                     abs_diffs[done.any(-1)] = float('inf')
                     _, best_index = abs_diffs.min(dim=0)
                     if done[best_index_all].any():
@@ -836,9 +858,10 @@ class DecoderEventsHandler(Handler):
 
                     first_time_expand = True
                     # TODO: we could do something like rejection sampling, or use some heuristic search.
-                    time_points_generator.update_step(best_index_all)
+                    # time_points_generator.update_step(best_index_all, done[best_index_all].any())
+                    time_points_generator.update_step(best_index)
                     pbar.n = time_points_generator.progress()[0]
-                    pbar.set_postfix({'ic_dev': abs_diffs[best_index_all].item()})
+                    pbar.set_postfix({'ic_dev': ic_dev})
                     pbar.refresh()
         interpolation_time_points = time_points_generator.get_all_eval_points()
         ic_int_temp = interpolator_template(interpolation_time_points)[0]

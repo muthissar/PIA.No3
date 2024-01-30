@@ -1,17 +1,12 @@
 from pathlib import Path
 from bs4 import BeautifulSoup
-from CIA.data_processors.data_processor import DataProcessor
-from CIA.dataloaders.piano_dataloader import PianoDataloaderGenerator
-from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
 from CIA.ic import DataPiece, ICRes
 from ic.app import Config
 import soundfile as sf
-import einops
 import numpy as np
 import plotly.express as px
 import plotly.graph_objs as go
 import pretty_midi
-import torch
 from plotly.subplots import make_subplots
 
 
@@ -25,10 +20,17 @@ def express_to_suplot(fig_plotly, explot, row, col):
 
 
 def plot(c : Config, sr : int = 25):
+    # TODO: this is not pretty
+    crop_start_time = 0
+    crop_end_time = 150
     # TODO: change all naming to metric
     if not isinstance(c.experiment.dataset, DataPiece):
         warn('Check implimentation, since it is not clear how to handle this case')
     for temp_file in [f for f in c.out.rglob('*/temp/ic.pt')]:
+        # NOTE: since right now we don't pass the dataprocessor, we cannot calculate the exact generated files. 
+        # Therefore not to recompute everything plot only those which are not already plotted
+        if temp_file.parent.joinpath(f'{c.experiment.match_metric}_curve.html').exists():
+            continue
         song_dir = temp_file.parent.parent
         res_temp = ICRes.load(p=temp_file)
         temp_midi = temp_file.parent.joinpath(f'song.mid')
@@ -47,6 +49,7 @@ def plot(c : Config, sr : int = 25):
             audio_files = []
             for i, (midi_file, result) in enumerate(zip(midi_files, results)):
                 midi = pretty_midi.PrettyMIDI(str(midi_file))
+                midi.instruments[0].notes = [n for n in midi.instruments[0].notes if n.start >= crop_start_time and n.start <= crop_end_time]
                 audio_sr = 44100
                 audio = midi.fluidsynth(fs=audio_sr)
                 audio_file = midi_file.parent.joinpath(f'song.mp3')
@@ -110,38 +113,11 @@ def plot(c : Config, sr : int = 25):
                 fig_plotly.update_yaxes(range=(0, metric_int_max+1), row=int_fig_row, col=1)
                 fig_plotly.update_yaxes(range=(0, metric_int_summed_max+1), row=int_summed_fig_row, col=1)
             fig_height = 2000
-            crop_end_time = 150
-            crop_start_time = 0
             fig_plotly.update_xaxes(tickformat="%M:%S.%3f")
             fig_plotly.update_layout(height=fig_height, xaxis=dict(range=[crop_start_time, crop_end_time]))
-            
-            # template = """
-            # <!DOCTYPE html>
-            # <html>
-            #     <head>
-            #         <meta charset="utf-8" />
-            #         <title>{{{{ title }}}}</title>
-            #         <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-            #     </head>
-            #     <body>
-            #         <audio controls>
-            #         <source src="{audio_files[0]}" type="audio/mpeg">
-            #         <source src="{audio_files[1]}" type="audio/mpeg">
-            #         Your browser does not support the audio element.
-            #         </audio>
-            #         {{{{ plotly_div }}}}
-            #         <p>My Custom Footer</p>
-            #     </body>
-            # </html>
-            # """
-            # fig_plotly.write_html(sample.parent.joinpath(f'{metric_name}_curve.html'), full_html=True, include_plotlyjs='cdn', template=template)
-            
             html_file = sample.parent.joinpath(f'{metric_name}_curve.html')
-            # import io
-            # string_file = io.StringIO()
-            # fig_plotly.write_html(html_file)
             html = fig_plotly.to_html()
-            soup = BeautifulSoup(html)
+            soup = BeautifulSoup(html, features="html.parser")
             audio_elems = [soup.new_tag('audio', controls=True, src=audio_file) for audio_file in audio_files]
             soup.div.insert_before(*audio_elems)
             with open(html_file, 'w') as file:
@@ -213,7 +189,7 @@ def plot_piano_roll(fig_plotly, image_row, sr, piano_roll, inpaint_time):
                     origin="lower",
                     color_continuous_scale="plasma",
                     labels=dict(x="Time", y="Pitch", color="Velocity"),
-                    x=np.arange(0, end, 1/sr),
+                    x=np.arange(0, end, 1/sr)[:piano_roll.shape[0]],
                 )
                 # TODO: this low level time calculation of tokens should not be here.
     

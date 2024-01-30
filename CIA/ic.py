@@ -65,7 +65,6 @@ class Piecewise(DrawnICCurve):
         conditions.append(t >= timepoints[-1])
         return torch.tensor(np.stack([np.piecewise(t, conditions, self._ics[:,i]) for i in range(self._ics.shape[1])],axis=-1)[None])
 
-
 class TimepointsGenerator:
     def initialize(self, placholder_duration : float):
         raise NotImplementedError
@@ -86,6 +85,7 @@ class TimepointsGenerator:
 class FixedStepTimepoints(TimepointsGenerator):
     step : float
     eval_step: float
+    tol_placeholder_duration : float = field(repr=False, default=0.2)
     def __post_init__(self):
         # super().__post_init__()
         assert (self.step / self.eval_step).is_integer()
@@ -121,6 +121,7 @@ class SingleNoteTimepoints(TimepointsGenerator):
     #     # assert (self.step / self.eval_step).is_integer()
     #     self.best_times = [0.0]
     k_traces : int = field(repr=False)
+    tol_placeholder_duration : float = field(repr=False, default=0.2)
     def initialize(self, placholder_duration : float):
         # self.current_time = 0.0
         self.placeholder_duration = placholder_duration
@@ -128,6 +129,7 @@ class SingleNoteTimepoints(TimepointsGenerator):
         # self.current_time_traces =  torch.zeros(self.k_traces)
         self.next_time_traces = torch.zeros(self.k_traces)
         self.best_times = [0.0]
+        warn('This value is hardcoded, and the same in decoder_events_handler.py')
     def update_is_exceeded(self, t : torch.FloatTensor, idx : int) -> bool:
         '''
         Times
@@ -137,9 +139,10 @@ class SingleNoteTimepoints(TimepointsGenerator):
         self.next_time_traces[idx] = t
         return True
     def done(self) -> bool:
-        return len(self.best_times)>0 and self.best_times[-1] >= self.placeholder_duration
+        return len(self.best_times)>0 and self.best_times[-1] >= self.placeholder_duration - self.tol_placeholder_duration
     def update_step(self, idx : int) -> None:
         # self.best_times.append(t.item())
+        # raise NotImplementedError('This does not work if generation[idx] is done... ')
         self.best_times.append(self.next_time_traces[idx].item())
         # self.time_traces = []
     def progress(self) -> Tuple[int, int]:
@@ -153,7 +156,11 @@ class SingleNoteTimepoints(TimepointsGenerator):
         # else:
         #     ts = torch.tensor(self.time_traces)[:, None]
         # ts = self.current_time_traces[:, None]
-        ts = torch.tensor(self.best_times[-1])[None, None]
+        # ts = torch.tensor(self.best_times[-1])[None, None]
+        # NOTE: quite inefficient, because in principle it would be enough to only use 
+        # next_time_traces, because we always expand from the note before. However, for times where the sequence is done, 
+        # we need to evaluate in the extra points. Can  we simply get rid of choosing the done sequences?
+        ts = torch.cat([torch.tensor(self.best_times)[None].expand(self.k_traces, -1), self.next_time_traces[:, None]], dim=1)
         return ts
     def get_all_eval_points(self):
         # return torch.arange(0, self.placeholder_duration, self.eval_step)
@@ -220,7 +227,7 @@ class Piece:
     path: str
     start_node: Union[int, float, str]
     n_inpaint: Union[int, float, str]
-    end_window: Optional[Union[int, float, str]]
+    end_window: Optional[Union[int, float, str]] = None
 
     def __post_init__(self):
         bot = datetime(1900,1,1)
@@ -236,15 +243,16 @@ class Piece:
                 sorted(notes_mozart, key=lambda n: n.start)
                 start_time = self.start_node
                 inpaint_end_time = start_time + self.n_inpaint
-                end_window_time = inpaint_end_time + self.end_window
                 start_decoding = np.argmin([abs(n.end - start_time) for n in  notes_mozart])
                 end_decoding = np.argmin([abs(n.end - inpaint_end_time) for n in  notes_mozart])
-                end_window = np.argmin([abs(n.end - end_window_time) for n in  notes_mozart])
                 warn('hard coded n_begin_notes')
                 n_begin_notes = 256
                 self.start_node = start_decoding - n_begin_notes
                 self.n_inpaint = end_decoding - start_decoding
-                self.end_window = end_window - end_decoding
+                if self.end_window is not None:
+                    end_window_time = inpaint_end_time + self.end_window
+                    end_window = np.argmin([abs(n.end - end_window_time) for n in  notes_mozart])
+                    self.end_window = end_window - end_decoding
 @dataclass
 class ICRes:
     tok: torch.Tensor
@@ -350,7 +358,7 @@ class DataPiece(Data):
     def __iter__(self):
         ds : PianoMidiDataset = self.dataloader_generator.dataset
         for piece in self.pieces:
-            piece_name = Path(piece.path).stem + f'_start_{piece.start_node}_nodes_{piece.n_inpaint}_end_{piece.end_window}'
+            piece_name = Path(piece.path).stem + f'_start_{piece.start_node}_nodes_{piece.n_inpaint}' + ('' if piece.end_window is None else f'_end_{piece.end_window}')
             # NOTE: parallelize over number of samples per piece
             sequence = ds.process_score(piece.path)
             orig_seq_length = len(sequence['pitch'])
@@ -359,7 +367,8 @@ class DataPiece(Data):
             warn('hard coded num_before tokens')
             n_begin_notes = 256
             if piece.start_node > 0:
-                raise NotImplementedError('Test that the following line works by also when piece.start <=0')
+                # raise NotImplementedError('Test that the following line works by also when piece.start <=0')
+                warn('Test that the following line works by also when piece.start <=0')
             end_node = piece.start_node + n_begin_notes + piece.n_inpaint + piece.end_window if piece.end_window is not None else None
             sequence = {k : v[slice(start_node, end_node)] for k,v in sequence.items()}
             # if piece.start_node < 0:

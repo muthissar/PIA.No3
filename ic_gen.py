@@ -161,6 +161,9 @@ def gen(c : Config, device='cpu'):
             decoding_start = data_processor.num_events_after+data_processor.num_events_before+2
     
             post_process_gen(dataloader_generator, before, after, gen_folder, gen, decoding_start)
+    del decoder_handler
+    decoder_handler = None
+    torch.cuda.empty_cache()
 def post_process_temp(
         dataloader_generator : PianoDataloaderGenerator,
         data_processor : DataProcessor,
@@ -358,13 +361,13 @@ if __name__ == "__main__":
             print(f'Experiment: {c.experiment}\n Sampling Config: {c.sampling_config}')
             gen(c, device=device)
             # NOTE: allow the processes to finish before plotting
-            # if torch.distributed.is_initialized():
-            #     torch.distributed.barrier()
-            # if 'RANK' not in os.environ or int(os.environ['RANK']) == 0 :    
-            #     plot(c)
+            if torch.distributed.is_initialized():
+                torch.distributed.barrier()
+            if 'RANK' not in os.environ or int(os.environ['RANK']) == 0 :    
+                plot(c)
 
     elif args.subcommand == "plot":
-        dataloader_generator,data_processor,decoder_handler = load_pia(device='cpu', skip_model=True)
+        # dataloader_generator,data_processor,decoder_handler = load_pia(device='cpu', skip_model=True)
         for c in init.app:
             plot(c)
     elif args.subcommand == "eval":

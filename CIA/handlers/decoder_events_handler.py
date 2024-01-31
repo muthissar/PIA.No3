@@ -573,8 +573,11 @@ class DecoderEventsHandler(Handler):
         num_max_generated_events=None,
         regenerate_first_ts=False,
     ):
+        # Weighting function used in interpolation
         weight_fn = experiment.weight
+        # Ic curve to match (None then will be calculated from template)
         interpolator_template = experiment.ic_curve
+        # 
         time_points_generator = experiment.time_points_generator
         # TODO add arguments to preprocess
         logger.debug(f'Placeholder duration: {metadata_dict["placeholder_duration"]}')
@@ -625,7 +628,9 @@ class DecoderEventsHandler(Handler):
                 decoding_start_event + num_max_generated_events, num_events
             )
         # NOTE: preallocate data structures
+        # Keeps which of the current traces are being expanded
         batch_indices = torch.tensor([0])
+        # Keeps the length of the current expanded traces
         event_indices = torch.tensor(sampling_config.k_traces*[decoding_start_event])
         x = einops.repeat(x, '1 ... -> k ...', k=sampling_config.k_traces).contiguous()
         ics = torch.zeros_like(x, dtype=torch.float32,device='cpu')
@@ -644,8 +649,12 @@ class DecoderEventsHandler(Handler):
             rank = int(os.environ['RANK']) if 'RANK' in os.environ else 0
             # TODO: change to (quantized) placeholder dir and the (quantized) gen dur
             with tqdm(total=time_points_generator.progress()[1], position=rank+2, desc=f'Sampling rank: {rank}', leave=False, unit='s', unit_scale=1.0) as pbar:
+                # Loop1, Measure the IC curves and choose best 
                 while True:
+                    # NOTE: loop inner, we either branch or expand continuoations. Actually that's generate 
+                    # until criterion where we can measue the points.
                     while first_time_expand or len(batch_indices) > 0:
+                        # NOTE: choose best trace and expand that.
                         if first_time_expand:
                             # NOTE indices the sequences which did not yet exceed the timepoint prune limit
                             not_done = ~done.any(-1)
@@ -661,7 +670,7 @@ class DecoderEventsHandler(Handler):
                             # channels of an event
                             # NOTE: When expanding first time, the output is the same.
                             # this speeds up the computation using SingleNote TimepointGenerator
-                            x_ = x[:1]
+                            x_ = x[best_index:best_index+1]
                             metadata_dict["original_sequence"] = x_.clone()
                             output_, target_embedded, h_pe = self.compute_event_state(
                                 target=x_,
@@ -682,8 +691,9 @@ class DecoderEventsHandler(Handler):
                         # Is it possible to simply minus the already generated time, and how does it work, when the placeholder duration is longer than the ones in
                         # the training data? Maybe we can simply use the highest value that was use in the train set, but how does this work in reality????
                         output = output_[torch.arange(len(batch_indices)), event_indices[batch_indices]]
-
+                        # NOTE: sample all channels
                         unexceeded_timepoint = []
+                        # TODO: rewrite to vectorized!
                         for channel_index in range(self.num_channels_target):    
                             # skip updates if we need to only recompute the FIRST TIMESHIFT
                             if (
@@ -741,7 +751,15 @@ class DecoderEventsHandler(Handler):
                                 start_idx = self.dataloader_generator.dataset.value2index['time_shift'][START_SYMBOL]
                                 filtered_logits[:, start_idx] = float('-inf')
 
-                            p = to_numpy(torch.softmax(filtered_logits, dim=-1))
+                            pt = torch.softmax(filtered_logits, dim=-1)
+                            # samples = pt.multinomial(num_samples=1)[:,0]
+                            # self.dataloader_generator.dataset.index2value['time_shift']
+                            # emb = torch.nn.Embedding.from_pretrained(
+                            #     torch.tensor([self.dataloader_generator.dataset.index2value['time_shift'][i] for i in range(104)])[:,None],
+                            #     freeze=True
+                            # ).to(samples.device)
+                            # time_shifts = emb(samples)[:,0]
+                            p = to_numpy(pt)
                             # update generated sequence
                             for p_, batch_index, event_index, logits_ in zip(p, batch_indices,  event_indices[batch_indices], filtered_logits):
                                 # TODO: this check seems to be allways true, since we start with event_index == decoding_start_event

@@ -190,7 +190,8 @@ class Interpolator(ICCurve):
         # NOTE: the ic padding cancels automatically.
         
         metric = self.metric.expand(w.shape[0], *self.metric.shape[1:])
-        return einops.einsum(w, metric, 'bz tok chan t, bz tok chan -> bz t chan')
+        ret = einops.einsum(w, metric, 'bz tok chan t, bz tok chan -> bz t chan')
+        return ret
 
 @dataclass
 class Weight(Callable[[torch.FloatTensor], torch.FloatTensor]):

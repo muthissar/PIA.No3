@@ -5,6 +5,87 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "combine_configs",
+            "type": "python",
+            "request": "launch",
+            "module": "combine_configs",
+            "justMyCode": false,
+            "args": [
+                // "--configs",
+                // "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-0-5-dataset-datacache-label-validation-n-inpaint-128-n-pieces-100-ic-curve-none/k-traces-64/config.yaml",
+                // "out/experiment-time-points-generator-fixedsteptimepoints-step-0-5-weight-movingaverage-window-size-0-5-c-0-5-dataset-datacache-label-validation-n-inpaint-128-n-pieces-100-ic-curve-none/k-traces-1/config.yaml",
+            ]
+        },
+        {
+            "name": "Python: plot",
+            "type": "python",
+            "request": "launch",
+            "module": "ic_gen",
+            "justMyCode": false,
+            "args": [
+                "--config",
+                // "configs/fixed_window_10s.yaml",
+                "configs/batik331.yaml",
+                "plot"
+            ]
+        },
+        {
+            "name": "Python: eval",
+            "type": "python",
+            "request": "launch",
+            "module": "ic_gen",
+            "justMyCode": false,
+            "args": [
+                "--config",
+                "configs/fixed_window_10s.yaml",
+                "eval",
+            ]
+        },
+        {
+            "name": "Python: Remote Attach",
+            "type": "python",
+            "request": "attach",
+            "connect": {
+                "host": "127.0.0.1",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "."
+                }
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Python: ic_gen",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/ic_gen.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--config",
+                // "configs/batik331.yaml",
+                // "configs/fixed_window_10s.yaml",
+                "configs/mozart_segment_2.yaml",
+                "gen"
+            ],
+
+            "env": {
+                "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
+                "CUDA_VISIBLE_DEVICES": "0"
+            }
+        },
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "train",
             "type": "python",
             "request": "launch",

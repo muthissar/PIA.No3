@@ -587,7 +587,8 @@ class DecoderEventsHandler(Handler):
         assert x.size(0) == 1
         index2value = self.dataloader_generator.dataset.index2value
         placeholder_duration = metadata_dict["placeholder_duration"].item()
-        generated_duration = torch.zeros(sampling_config.k_traces, *x.shape[1:])
+        # generated_duration = torch.zeros(sampling_config.k_traces, *x.shape[1:])
+        accumulated_shifts = torch.zeros(sampling_config.k_traces, x.shape[1])
         decoding_start_event = metadata_dict["decoding_start"]
         template_decoding_end = metadata_dict["decoding_end"].item()
         # NOTE: copy the original sequence:
@@ -660,7 +661,8 @@ class DecoderEventsHandler(Handler):
                             not_done = ~done.any(-1)
                             batch_indices = torch.arange(sampling_config.k_traces)[not_done]
                             event_indices[not_done] = event_indices[best_index]
-                            generated_duration[not_done] = generated_duration[best_index]
+                            # generated_duration[not_done] = generated_duration[best_index]
+                            accumulated_shifts[not_done] = accumulated_shifts[best_index]
                             x[not_done] = x[best_index]
                             ics[not_done] = ics[best_index]
                             entrs[not_done] = entrs[best_index]
@@ -840,7 +842,19 @@ class DecoderEventsHandler(Handler):
                                         ]["END"]
                                     for channel_index in range(self.num_channels_target)])
                         # TODO: do something if SingleNoteTimepoints
-                        done_ = samples.cpu() == end_symbol_idx
+                        samples = x[batch_indices, event_indices[batch_indices]]
+                        done_ = samples.cpu() == end_symbol_idx[None]
+
+                        self.dataloader_generator.dataset.index2value['time_shift']
+                        emb = torch.nn.Embedding.from_pretrained(
+                            torch.tensor([self.dataloader_generator.dataset.index2value['time_shift'][i] for i in range(104)])[:,None],
+                            freeze=True
+                        ).to(samples.device)
+                        time_shifs_idx = samples[:, 3]
+                        warn('This will eventually fail if some idx are not there....') 
+                        time_shifts = emb(samples)[:,0]
+                        # NOTE: keep accumulated, but we could instead keep diffs.
+                        accumulated_shifts[batch_indices, event_indices[batch_indices]] = accumulated_shifts[batch_indices, event_indices[batch_indices]-1] + time_shifts
                         event_indices[batch_indices] += 1    
                         batch_indices = torch.LongTensor(unexceeded_timepoint)
                     # TODO: we can optimize this by only computing for the ones actively expanded (i.e. in batch_index),

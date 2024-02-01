@@ -810,31 +810,31 @@ class DecoderEventsHandler(Handler):
                                     # NOTE: It seems that when the length of the generation is close to, but smaller than the  placeholder duration, 
                                     # then the model keeps on generating notes 0 time_shifts... Therefore allow to undershoot placeholder duration.
                                     # tol_placeholder_duration = 2e-1 
-                                    if channel_index != 3:
-                                        if onset_on_next_note:
-                                            generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index - 1, 3]
-                                        else:
-                                            generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index, 3]
-                                    else:
-                                        shift = index2value["time_shift"][
-                                            new_pitch_index
-                                        ]
-                                        shift = 0.0 if shift == 'END' else shift
-                                        # generated_duration[batch_index, event_index] = generated_duration[batch_index, event_index - 1] + shift
-                                        if onset_on_next_note:
-                                            generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index - 1, channel_index] + shift
-                                        else:
-                                            generated_duration[batch_index, event_index + 1, channel_index] = generated_duration[batch_index, event_index, channel_index] + shift
-                                        warn('Check if next two uses of generated_duration are correct to use channel_index=3? ')
-                                        exceeded = time_points_generator.update_is_exceeded(generated_duration[batch_index, event_index, channel_index], batch_index)
-                                        if event_index == x.size(1) - 2:
-                                            logger.debug(f"End of decoding due to reaching last sequence index.\nMissing: {generated_duration[batch_index, event_index] - placeholder_duration}")
-                                            done[batch_index, channel_index] = True
-                                        elif generated_duration[batch_index, event_index, channel_index] > placeholder_duration - time_points_generator.tol_placeholder_duration:
-                                            logger.debug('End of decoding due to the generation > than placeholder duration.\nExcess: {generated_duration[batch_index, event_index] - placeholder_duration}')
-                                            done[batch_index, channel_index] = True
-                                        elif not exceeded:
-                                            unexceeded_timepoint.append(batch_index)
+                                    # if channel_index != 3:
+                                    #     if onset_on_next_note:
+                                    #         generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index - 1, 3]
+                                    #     else:
+                                    #         generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index, 3]
+                                    # else:
+                                    #     shift = index2value["time_shift"][
+                                    #         new_pitch_index
+                                    #     ]
+                                    #     shift = 0.0 if shift == 'END' else shift
+                                    #     # generated_duration[batch_index, event_index] = generated_duration[batch_index, event_index - 1] + shift
+                                    #     if onset_on_next_note:
+                                    #         generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index - 1, channel_index] + shift
+                                    #     else:
+                                    #         generated_duration[batch_index, event_index + 1, channel_index] = generated_duration[batch_index, event_index, channel_index] + shift
+                                    #     warn('Check if next two uses of generated_duration are correct to use channel_index=3? ')
+                                    #     exceeded = time_points_generator.update_is_exceeded(generated_duration[batch_index, event_index, channel_index], batch_index)
+                                    #     if event_index == x.size(1) - 2:
+                                    #         logger.debug(f"End of decoding due to reaching last sequence index.\nMissing: {generated_duration[batch_index, event_index] - placeholder_duration}")
+                                    #         done[batch_index, channel_index] = True
+                                    #     elif generated_duration[batch_index, event_index, channel_index] > placeholder_duration - time_points_generator.tol_placeholder_duration:
+                                    #         logger.debug('End of decoding due to the generation > than placeholder duration.\nExcess: {generated_duration[batch_index, event_index] - placeholder_duration}')
+                                    #         done[batch_index, channel_index] = True
+                                    #     elif not exceeded:
+                                    #         unexceeded_timepoint.append(batch_index)
                         # generated_duration
                         end_symbol_idx = torch.tensor([
                                         self.dataloader_generator.dataset.value2index[
@@ -856,8 +856,9 @@ class DecoderEventsHandler(Handler):
                         time_shifts = emb(time_shifs_idx.cpu())[:,0]
                         # NOTE: keep accumulated, but we could instead keep diffs.
                         accumulated_shifts[batch_indices, event_indices[batch_indices]] = accumulated_shifts[batch_indices, event_indices[batch_indices]-1] + time_shifts
-                        generated_durations = accumulated_shifts[batch_indices,decoding_start_event-1:event_indices[batch_indices].max()+1] 
-                        self.accshift_to_token_times(onset_on_next_note=onset_on_next_note, shifts_cum=generated_durations)
+                        acc_shifts = accumulated_shifts[batch_indices,decoding_start_event:event_indices[batch_indices].max()+1] 
+                        token_times = self.accshift_to_token_times(onset_on_next_note=onset_on_next_note, shifts_cum=acc_shifts)
+                        end_duration = token_times[torch.arange(len(batch_indices)), event_indices[batch_indices]-decoding_start_event]
                         # if onset_on_next_note:
 
                         event_indices[batch_indices] += 1    
@@ -1048,10 +1049,10 @@ class DecoderEventsHandler(Handler):
             return onsets, end,  ics_middle, entrs_middle
 
     def accshift_to_token_times(self, onset_on_next_note, shifts_cum):
-        shifts_cum_rolled = shifts_cum.roll(1)
-        shifts_cum_rolled[0] = 0.0
+        shifts_cum_rolled = shifts_cum.roll(shifts=1, dims=-1)
+        shifts_cum_rolled[...,0] = 0.0
         if onset_on_next_note:
-            onsets = torch.stack([shifts_cum_rolled, shifts_cum_rolled, shifts_cum_rolled, shifts_cum], 1)
+            onsets = torch.stack(3*[shifts_cum_rolled]+ [shifts_cum], -1)
         else:
-            onsets = torch.stack(4*[shifts_cum_rolled], 1)
+            onsets = torch.stack(4*[shifts_cum_rolled], -1)
         return onsets

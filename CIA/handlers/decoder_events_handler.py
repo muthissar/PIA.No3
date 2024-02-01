@@ -858,7 +858,8 @@ class DecoderEventsHandler(Handler):
                         accumulated_shifts[batch_indices, event_indices[batch_indices]] = accumulated_shifts[batch_indices, event_indices[batch_indices]-1] + time_shifts
                         acc_shifts = accumulated_shifts[batch_indices,decoding_start_event:event_indices[batch_indices].max()+1] 
                         token_times = self.accshift_to_token_times(onset_on_next_note=onset_on_next_note, shifts_cum=acc_shifts)
-                        end_duration = token_times[torch.arange(len(batch_indices)), event_indices[batch_indices]-decoding_start_event]
+                        # 
+                        end_duration = token_times[torch.arange(len(batch_indices)), event_indices[batch_indices]-decoding_start_event].max(-1)[0]
                         # if onset_on_next_note:
 
                         event_indices[batch_indices] += 1    

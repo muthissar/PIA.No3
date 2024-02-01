@@ -847,12 +847,13 @@ class DecoderEventsHandler(Handler):
 
                         self.dataloader_generator.dataset.index2value['time_shift']
                         emb = torch.nn.Embedding.from_pretrained(
-                            torch.tensor([self.dataloader_generator.dataset.index2value['time_shift'][i] for i in range(104)])[:,None],
+                            torch.FloatTensor([self.dataloader_generator.dataset.index2value['time_shift'][i] for i in range(104)])[:,None],
                             freeze=True
-                        ).to(samples.device)
+                        ) 
+                        # .to(samples.device)
                         time_shifs_idx = samples[:, 3]
                         warn('This will eventually fail if some idx are not there....') 
-                        time_shifts = emb(time_shifs_idx)[:,0]
+                        time_shifts = emb(time_shifs_idx.cpu())[:,0]
                         # NOTE: keep accumulated, but we could instead keep diffs.
                         accumulated_shifts[batch_indices, event_indices[batch_indices]] = accumulated_shifts[batch_indices, event_indices[batch_indices]-1] + time_shifts
                         event_indices[batch_indices] += 1    

@@ -850,7 +850,9 @@ class DecoderEventsHandler(Handler):
                         samples = x[batch_indices, event_indices[batch_indices]]
                         end = samples.cpu() == end_symbol_idx[None]
 
-                        len_exceeded = event_indices[batch_indices] == x.shape[-2]
+                        len_exceeded = event_indices[batch_indices] == x.shape[-2] -1
+                        
+                        
 
                         stop_outer = (end.any(-1)) | (len_exceeded)
                         stop_outer_idx = batch_indices[stop_outer].tolist()

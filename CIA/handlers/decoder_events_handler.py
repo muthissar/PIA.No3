@@ -633,10 +633,12 @@ class DecoderEventsHandler(Handler):
         batch_indices = torch.tensor([0])
         # Keeps the length of the current expanded traces
         event_indices = torch.tensor(sampling_config.k_traces*[decoding_start_event])
+        # event_indices = torch.tensor(sampling_config.k_traces*[decoding_start_event-1])
         x = einops.repeat(x, '1 ... -> k ...', k=sampling_config.k_traces).contiguous()
         ics = torch.zeros_like(x, dtype=torch.float32,device='cpu')
         entrs = torch.zeros_like(x, dtype=torch.float32,device='cpu')
-        done = torch.zeros((sampling_config.k_traces, n_feats), dtype=torch.bool, device='cpu')
+        # done = torch.zeros((sampling_config.k_traces, n_feats), dtype=torch.bool, device='cpu')
+        has_end = torch.zeros((sampling_config.k_traces), dtype=torch.bool, device='cpu')
         first_time_expand = True
         best_index = 0
         def ic_curve_dev(ic_int, ic_int_temp):
@@ -656,9 +658,10 @@ class DecoderEventsHandler(Handler):
                     # until criterion where we can measue the points.
                     while first_time_expand or len(batch_indices) > 0:
                         # NOTE: choose best trace and expand that.
+                        # event_indices[batch_indices] += 1
                         if first_time_expand:
                             # NOTE indices the sequences which did not yet exceed the timepoint prune limit
-                            not_done = ~done.any(-1)
+                            not_done = ~has_end
                             batch_indices = torch.arange(sampling_config.k_traces)[not_done]
                             event_indices[not_done] = event_indices[best_index]
                             # generated_duration[not_done] = generated_duration[best_index]
@@ -694,7 +697,7 @@ class DecoderEventsHandler(Handler):
                         # the training data? Maybe we can simply use the highest value that was use in the train set, but how does this work in reality????
                         output = output_[torch.arange(len(batch_indices)), event_indices[batch_indices]]
                         # NOTE: sample all channels
-                        unexceeded_timepoint = []
+                        # unexceeded_timepoint = []
                         # TODO: rewrite to vectorized!
                         for channel_index in range(self.num_channels_target):    
                             # skip updates if we need to only recompute the FIRST TIMESHIFT
@@ -760,82 +763,82 @@ class DecoderEventsHandler(Handler):
                             ics[batch_indices, event_indices[batch_indices], channels] = -pt[torch.arange(len(samples)), samples].log().cpu()
                             entrs[batch_indices, event_indices[batch_indices], channels] = numerial_stable_softmax_entr(filtered_logits, dim=-1).sum(dim=-1).cpu()
 
-                            # note at end
-                            # self.dataloader_generator.dataset.index2value['time_shift']
-                            # emb = torch.nn.Embedding.from_pretrained(
-                            #     torch.tensor([self.dataloader_generator.dataset.index2value['time_shift'][i] for i in range(104)])[:,None],
-                            #     freeze=True
-                            # ).to(samples.device)
-                            # time_shifts = emb(samples)[:,0]
-                            p = to_numpy(pt)
-                            # update generated sequence
-                            for p_, batch_index, event_index, logits_ in zip(p, batch_indices,  event_indices[batch_indices], filtered_logits):
-                                # TODO: this check seems to be allways true, since we start with event_index == decoding_start_event
-                                if event_index >= decoding_start_event:
-                                    new_pitch_index = np.random.choice(
-                                        np.arange(
-                                            self.num_tokens_per_channel_target[channel_index]
-                                        ),
-                                        p=p_,
-                                    )
-                                    x[batch_index, event_index, channel_index] = int(
-                                        new_pitch_index
-                                    )
-                                    ics[batch_index, event_index, channel_index] = (-np.log(p_[new_pitch_index])).tolist()
-                                    entrs[batch_index, event_index, channel_index] = numerial_stable_softmax_entr(logits_, dim=-1).sum(dim=-1)
+                        #     # note at end
+                        #     # self.dataloader_generator.dataset.index2value['time_shift']
+                        #     # emb = torch.nn.Embedding.from_pretrained(
+                        #     #     torch.tensor([self.dataloader_generator.dataset.index2value['time_shift'][i] for i in range(104)])[:,None],
+                        #     #     freeze=True
+                        #     # ).to(samples.device)
+                        #     # time_shifts = emb(samples)[:,0]
+                        #     p = to_numpy(pt)
+                        #     # update generated sequence
+                        #     for p_, batch_index, event_index, logits_ in zip(p, batch_indices,  event_indices[batch_indices], filtered_logits):
+                        #         # TODO: this check seems to be allways true, since we start with event_index == decoding_start_event
+                        #         if event_index >= decoding_start_event:
+                        #             new_pitch_index = np.random.choice(
+                        #                 np.arange(
+                        #                     self.num_tokens_per_channel_target[channel_index]
+                        #                 ),
+                        #                 p=p_,
+                        #             )
+                        #             x[batch_index, event_index, channel_index] = int(
+                        #                 new_pitch_index
+                        #             )
+                        #             ics[batch_index, event_index, channel_index] = (-np.log(p_[new_pitch_index])).tolist()
+                        #             entrs[batch_index, event_index, channel_index] = numerial_stable_softmax_entr(logits_, dim=-1).sum(dim=-1)
 
-                                    end_symbol_index = (
-                                        self.dataloader_generator.dataset.value2index[
-                                            self.dataloader_generator.features[channel_index]
-                                        ]["END"]
-                                    )
-                                    # TODO: move all termination checks together, for better readability.
-                                    if end_symbol_index == int(new_pitch_index):
-                                        # warn('Find out if end can happen accross different channels?')
-                                        # logger.warn('Find out if end can happen accross different channels?')
-                                        # NOTE if a sequence is done, we keep it's interpolation and continue
-                                        # computing the rest of the timepoints
-                                        if  not isinstance(time_points_generator, SingleNoteTimepoints):
-                                            warn('dirty hack  to account for the fact that the note strategy never really finish...')
-                                            done[batch_index, channel_index] = True
-                                        # NOTE: avoid end token to be written in the middle tokens
-                                        event_indices[batch_index] -= 1
-                                        logger.info("End of decoding due to END symbol generation")
+                        #             end_symbol_index = (
+                        #                 self.dataloader_generator.dataset.value2index[
+                        #                     self.dataloader_generator.features[channel_index]
+                        #                 ]["END"]
+                        #             )
+                        #             # TODO: move all termination checks together, for better readability.
+                        #             if end_symbol_index == int(new_pitch_index):
+                        #                 # warn('Find out if end can happen accross different channels?')
+                        #                 # logger.warn('Find out if end can happen accross different channels?')
+                        #                 # NOTE if a sequence is done, we keep it's interpolation and continue
+                        #                 # computing the rest of the timepoints
+                        #                 if  not isinstance(time_points_generator, SingleNoteTimepoints):
+                        #                     warn('dirty hack  to account for the fact that the note strategy never really finish...')
+                        #                     has_end[batch_index, channel_index] = True
+                        #                 # NOTE: avoid end token to be written in the middle tokens
+                        #                 event_indices[batch_index] -= 1
+                        #                 logger.info("End of decoding due to END symbol generation")
 
-                                    # Additional check:
-                                    # if the generated duration is > than the
-                                    # placeholder_duration
-                                    # TODO hardcoded channel index for timeshifts
-                                    warn('Refactor!')
-                                    # NOTE: It seems that when the length of the generation is close to, but smaller than the  placeholder duration, 
-                                    # then the model keeps on generating notes 0 time_shifts... Therefore allow to undershoot placeholder duration.
-                                    # tol_placeholder_duration = 2e-1 
-                                    # if channel_index != 3:
-                                    #     if onset_on_next_note:
-                                    #         generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index - 1, 3]
-                                    #     else:
-                                    #         generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index, 3]
-                                    # else:
-                                    #     shift = index2value["time_shift"][
-                                    #         new_pitch_index
-                                    #     ]
-                                    #     shift = 0.0 if shift == 'END' else shift
-                                    #     # generated_duration[batch_index, event_index] = generated_duration[batch_index, event_index - 1] + shift
-                                    #     if onset_on_next_note:
-                                    #         generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index - 1, channel_index] + shift
-                                    #     else:
-                                    #         generated_duration[batch_index, event_index + 1, channel_index] = generated_duration[batch_index, event_index, channel_index] + shift
-                                    #     warn('Check if next two uses of generated_duration are correct to use channel_index=3? ')
-                                    #     exceeded = time_points_generator.update_is_exceeded(generated_duration[batch_index, event_index, channel_index], batch_index)
-                                    #     if event_index == x.size(1) - 2:
-                                    #         logger.debug(f"End of decoding due to reaching last sequence index.\nMissing: {generated_duration[batch_index, event_index] - placeholder_duration}")
-                                    #         done[batch_index, channel_index] = True
-                                    #     elif generated_duration[batch_index, event_index, channel_index] > placeholder_duration - time_points_generator.tol_placeholder_duration:
-                                    #         logger.debug('End of decoding due to the generation > than placeholder duration.\nExcess: {generated_duration[batch_index, event_index] - placeholder_duration}')
-                                    #         done[batch_index, channel_index] = True
-                                    #     elif not exceeded:
-                                    #         unexceeded_timepoint.append(batch_index)
-                        # generated_duration
+                        #             # Additional check:
+                        #             # if the generated duration is > than the
+                        #             # placeholder_duration
+                        #             # TODO hardcoded channel index for timeshifts
+                        #             warn('Refactor!')
+                        #             # NOTE: It seems that when the length of the generation is close to, but smaller than the  placeholder duration, 
+                        #             # then the model keeps on generating notes 0 time_shifts... Therefore allow to undershoot placeholder duration.
+                        #             # tol_placeholder_duration = 2e-1 
+                        #             # if channel_index != 3:
+                        #             #     if onset_on_next_note:
+                        #             #         generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index - 1, 3]
+                        #             #     else:
+                        #             #         generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index, 3]
+                        #             # else:
+                        #             #     shift = index2value["time_shift"][
+                        #             #         new_pitch_index
+                        #             #     ]
+                        #             #     shift = 0.0 if shift == 'END' else shift
+                        #             #     # generated_duration[batch_index, event_index] = generated_duration[batch_index, event_index - 1] + shift
+                        #             #     if onset_on_next_note:
+                        #             #         generated_duration[batch_index, event_index, channel_index] = generated_duration[batch_index, event_index - 1, channel_index] + shift
+                        #             #     else:
+                        #             #         generated_duration[batch_index, event_index + 1, channel_index] = generated_duration[batch_index, event_index, channel_index] + shift
+                        #             #     warn('Check if next two uses of generated_duration are correct to use channel_index=3? ')
+                        #             #     exceeded = time_points_generator.update_is_exceeded(generated_duration[batch_index, event_index, channel_index], batch_index)
+                        #             #     if event_index == x.size(1) - 2:
+                        #             #         logger.debug(f"End of decoding due to reaching last sequence index.\nMissing: {generated_duration[batch_index, event_index] - placeholder_duration}")
+                        #             #         done[batch_index, channel_index] = True
+                        #             #     elif generated_duration[batch_index, event_index, channel_index] > placeholder_duration - time_points_generator.tol_placeholder_duration:
+                        #             #         logger.debug('End of decoding due to the generation > than placeholder duration.\nExcess: {generated_duration[batch_index, event_index] - placeholder_duration}')
+                        #             #         done[batch_index, channel_index] = True
+                        #             #     elif not exceeded:
+                        #             #         unexceeded_timepoint.append(batch_index)
+                        # # generated_duration
                         end_symbol_idx = torch.tensor([
                                         self.dataloader_generator.dataset.value2index[
                                             self.dataloader_generator.features[channel_index]
@@ -843,31 +846,47 @@ class DecoderEventsHandler(Handler):
                                     for channel_index in range(self.num_channels_target)])
                         # TODO: do something if SingleNoteTimepoints
                         samples = x[batch_indices, event_indices[batch_indices]]
-                        done_ = samples.cpu() == end_symbol_idx[None]
+                        end = samples.cpu() == end_symbol_idx[None]
+                        has_end_idx = batch_indices[end.any(-1)].tolist()
+                        has_end[has_end_idx] = True
+                        # NOTE: avoid end token to be written in the middle tokens
+                        event_indices[has_end] -= 1
+                        
+                        batch_indices = batch_indices[~end.any(-1)]
 
-                        self.dataloader_generator.dataset.index2value['time_shift']
                         emb = torch.nn.Embedding.from_pretrained(
                             torch.FloatTensor([self.dataloader_generator.dataset.index2value['time_shift'][i] for i in range(104)])[:,None],
                             freeze=True
                         ) 
                         # .to(samples.device)
-                        time_shifs_idx = samples[:, 3]
-                        warn('This will eventually fail if some idx are not there....') 
+                        time_shifs_idx = samples[~end.any(-1), 3]
+                        # warn('This will eventually fail if some idx are not there....') 
                         time_shifts = emb(time_shifs_idx.cpu())[:,0]
                         # NOTE: keep accumulated, but we could instead keep diffs.
                         accumulated_shifts[batch_indices, event_indices[batch_indices]] = accumulated_shifts[batch_indices, event_indices[batch_indices]-1] + time_shifts
-                        acc_shifts = accumulated_shifts[batch_indices,decoding_start_event:event_indices[batch_indices].max()+1] 
+                        
+                        # acc_shifts = accumulated_shifts[batch_indices,decoding_start_event:event_indices[batch_indices].max()+1] 
+                        # token_times = self.accshift_to_token_times(onset_on_next_note=onset_on_next_note, shifts_cum=acc_shifts)
+                        # end_duration = token_times[torch.arange(len(batch_indices)), event_indices[batch_indices]-decoding_start_event].max(-1)[0]
+                        acc_shifts = accumulated_shifts[torch.arange(sampling_config.k_traces),decoding_start_event:event_indices.max()+1]
                         token_times = self.accshift_to_token_times(onset_on_next_note=onset_on_next_note, shifts_cum=acc_shifts)
-                        # 
-                        end_duration = token_times[torch.arange(len(batch_indices)), event_indices[batch_indices]-decoding_start_event].max(-1)[0]
+                        end_duration = token_times[torch.arange(sampling_config.k_traces), event_indices-decoding_start_event].max(-1)[0]
+                        # TODO: update is exceeded is weird double functionality. Change to two...
                         # if onset_on_next_note:
-
+                        exceeded = torch.tensor([time_points_generator.update_is_exceeded(end_duration[batch_index], batch_index) for batch_index in batch_indices])
+                        # done_idx += batch_indices[torch.tensor([time_points_generator.done() for i, batch_index in enumerate(batch_indices)])]
                         event_indices[batch_indices] += 1    
-                        batch_indices = torch.LongTensor(unexceeded_timepoint)
+                        
+                        
+                        
+                        batch_indices = batch_indices[~exceeded]
+                        
+                        # batch_indices = torch.LongTensor(unexceeded_timepoint)
                     # TODO: we can optimize this by only computing for the ones actively expanded (i.e. in batch_index),
                     # TODO: make the expantion prettier
                     # ic_times_list = [dur[decoding_start_event-1:event_index-1][:, None].repeat(1, self.num_channels_target) for dur, event_index in zip(generated_duration, event_indices)]
-                    ic_times_list = [dur[decoding_start_event:event_index] for dur, event_index in zip(generated_duration, event_indices)]
+                    # ic_times_list = [dur[decoding_start_event:event_index] for dur, event_index in zip(generated_duration, event_indices)]
+                    ic_times_list = [dur[:event_index] for dur, event_index in zip(token_times, event_indices-decoding_start_event)]
                     if experiment.match_metric == 'ic':
                         ics_list = [ic[decoding_start_event:event_index] for ic,event_index in zip(ics, event_indices)]
                         metric_list = ics_list
@@ -890,7 +909,7 @@ class DecoderEventsHandler(Handler):
                     _, best_index_all = abs_diffs.min(dim=0)
                     # TODO: remove the termination from here to reduce spaghetti code
                     ic_dev = abs_diffs[best_index_all].item()
-                    if done.any(-1).all() or time_points_generator.done()\
+                    if has_end.all() or time_points_generator.done()\
                         :
                         # or isinstance(time_points_generator, SingleNoteTimepoints) and done.any(-1).any() :
                         # if isinstance(time_points_generator, SingleNoteTimepoints) and done.any(-1).any() :
@@ -900,14 +919,14 @@ class DecoderEventsHandler(Handler):
                         decoding_end +=1
                         break
                     # NOTE: keep the done sequences only in the case where it's better than any other   ...
-                    abs_diffs[done.any(-1)] = float('inf')
+                    abs_diffs[has_end] = float('inf')
                     _, best_index = abs_diffs.min(dim=0)
-                    if done[best_index_all].any():
-                        done[:] = False    
-                        done[best_index_all] = True
+                    if has_end[best_index_all].any():
+                        has_end[:] = False    
+                        has_end[best_index_all] = True
                     else:
                         # in this case as the finished sequence is worse than another sequence, don't keep any.
-                        done[:] = False    
+                        has_end[:] = False    
 
                     first_time_expand = True
                     # TODO: we could do something like rejection sampling, or use some heuristic search.
@@ -934,7 +953,8 @@ class DecoderEventsHandler(Handler):
         ic_int_gen = interpolator(interpolation_time_points)[best_index_all]
         tok_times = ic_times_list[best_index_all]
         # inpaint_end_gen = generated_duration[best_index_all][event_indices[best_index_all]][-1].item()
-        inpaint_end_gen = generated_duration[best_index_all][event_indices[best_index_all]].max().item()
+        warn("There's a mismatch now that we don't have these extra 0 tokens until decoding beginnig... ")
+        inpaint_end_gen = token_times[best_index_all][event_indices[best_index_all]].max().item()
         gen = ICRes(
             tok = x[best_index_all].cpu(),
             ic_tok = ic_tok_gen,

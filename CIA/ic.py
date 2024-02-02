@@ -96,7 +96,8 @@ class FixedStepTimepoints(TimepointsGenerator):
         '''
         Times
         '''
-        return t >= self.current_step * self.step
+        # return t >= self.current_step * self.step
+        return t > self.current_step * self.step
     def done(self) -> bool:
         return self.current_step * self.step >= self.placeholder_duration
     def update_step(self, idx :int) -> None:

@@ -81,7 +81,7 @@ class Handler:
         dist.barrier()
 
     def load(self, early_stopped):
-        map_location = {'cuda:0': f'cuda:{dist.get_rank()}'}
+        map_location = {'cuda:0': f'cuda:{dist.get_rank()}'} if torch.cuda.is_available() else 'cpu'
         print(f'Loading models {self.__repr__()}')
         if early_stopped:
             print('Load early stopped model')

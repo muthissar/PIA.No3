@@ -638,7 +638,7 @@ class DecoderEventsHandler(Handler):
         ics = torch.zeros_like(x, dtype=torch.float32,device='cpu')
         entrs = torch.zeros_like(x, dtype=torch.float32,device='cpu')
         # done = torch.zeros((sampling_config.k_traces, n_feats), dtype=torch.bool, device='cpu')
-        has_end = torch.zeros((sampling_config.k_traces), dtype=torch.bool, device='cpu')
+        completed = torch.zeros((sampling_config.k_traces), dtype=torch.bool, device='cpu')
         first_time_expand = True
         best_index = 0
         def ic_curve_dev(ic_int, ic_int_temp):
@@ -661,7 +661,7 @@ class DecoderEventsHandler(Handler):
                         # event_indices[batch_indices] += 1
                         if first_time_expand:
                             # NOTE indices the sequences which did not yet exceed the timepoint prune limit
-                            not_done = ~has_end
+                            not_done = ~completed
                             batch_indices = torch.arange(sampling_config.k_traces)[not_done]
                             event_indices[not_done] = event_indices[best_index]
                             # generated_duration[not_done] = generated_duration[best_index]
@@ -844,18 +844,27 @@ class DecoderEventsHandler(Handler):
                                             self.dataloader_generator.features[channel_index]
                                         ]["END"]
                                     for channel_index in range(self.num_channels_target)])
+                        # NOTE: here we inspect if the end token was generated. This would normally mean termination,
+                        # however, it most likely only maskes sense to terminate in this case, if the "after" tokens are empty
                         # TODO: do something if SingleNoteTimepoints
                         samples = x[batch_indices, event_indices[batch_indices]]
                         end = samples.cpu() == end_symbol_idx[None]
-                        has_end_idx = batch_indices[end.any(-1)].tolist()
-                        has_end[has_end_idx] = True
+
+                        len_exceeded = event_indices[batch_indices] == x.shape[-2]
+
+                        stop_outer = (end.any(-1)) | (len_exceeded)
+                        stop_outer_idx = batch_indices[stop_outer].tolist()
+                        completed[stop_outer_idx] = True
                         # NOTE: avoid end token to be written in the middle tokens
-                        event_indices[has_end] -= 1
+                        event_indices[completed] -= 1
                         
                         batch_indices = batch_indices[~end.any(-1)]
 
                         emb = torch.nn.Embedding.from_pretrained(
-                            torch.FloatTensor([self.dataloader_generator.dataset.index2value['time_shift'][i] for i in range(104)])[:,None],
+                            torch.FloatTensor(
+                                [self.dataloader_generator.dataset.index2value['time_shift'][i] for i in range(104)] 
+                                + 3*[0.0] # FOR Padding (XX), Start and End tokens, we add a timeshift of 0.0 but we should in general check...
+                            )[:,None],
                             freeze=True
                         ) 
                         # .to(samples.device)
@@ -873,7 +882,7 @@ class DecoderEventsHandler(Handler):
                         end_duration = token_times[torch.arange(sampling_config.k_traces), event_indices-decoding_start_event].max(-1)[0]
                         # TODO: update is exceeded is weird double functionality. Change to two...
                         # if onset_on_next_note:
-                        exceeded = torch.tensor([time_points_generator.update_is_exceeded(end_duration[batch_index], batch_index) for batch_index in batch_indices])
+                        exceeded = torch.BoolTensor([time_points_generator.update_is_exceeded(end_duration[batch_index], batch_index) for batch_index in batch_indices])
                         # done_idx += batch_indices[torch.tensor([time_points_generator.done() for i, batch_index in enumerate(batch_indices)])]
                         event_indices[batch_indices] += 1    
                         
@@ -909,7 +918,7 @@ class DecoderEventsHandler(Handler):
                     _, best_index_all = abs_diffs.min(dim=0)
                     # TODO: remove the termination from here to reduce spaghetti code
                     ic_dev = abs_diffs[best_index_all].item()
-                    if has_end.all() or time_points_generator.done()\
+                    if completed.all() or time_points_generator.done()\
                         :
                         # or isinstance(time_points_generator, SingleNoteTimepoints) and done.any(-1).any() :
                         # if isinstance(time_points_generator, SingleNoteTimepoints) and done.any(-1).any() :
@@ -919,14 +928,14 @@ class DecoderEventsHandler(Handler):
                         decoding_end +=1
                         break
                     # NOTE: keep the done sequences only in the case where it's better than any other   ...
-                    abs_diffs[has_end] = float('inf')
+                    abs_diffs[completed] = float('inf')
                     _, best_index = abs_diffs.min(dim=0)
-                    if has_end[best_index_all].any():
-                        has_end[:] = False    
-                        has_end[best_index_all] = True
+                    if completed[best_index_all].any():
+                        completed[:] = False    
+                        completed[best_index_all] = True
                     else:
                         # in this case as the finished sequence is worse than another sequence, don't keep any.
-                        has_end[:] = False    
+                        completed[:] = False    
 
                     first_time_expand = True
                     # TODO: we could do something like rejection sampling, or use some heuristic search.

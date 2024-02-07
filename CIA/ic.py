@@ -309,10 +309,10 @@ class DataCache(Data):
     # dataloader_generator : DataloaderGenerator
     n_inpaint : Union[int, float]
     split : str
-    end_window: Optional[Union[int, float]]
     midi_path : str = field(repr=False)
     cache_path : str = field(repr=False)
     n_pieces: Optional[int] = None
+    end_window: Optional[Union[int, float]] = None
     def __post_init__(self):
         assert Path(self.midi_path).is_dir()
         if isinstance(self.n_inpaint, int):

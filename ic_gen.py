@@ -335,6 +335,7 @@ if __name__ == "__main__":
     subcommands.add_subcommand("eval", eval_subcomm)
     args = parser.parse_args()
     init = parser.instantiate_classes(args)
+    app : List[Config] = init.app
     if args.subcommand == 'gen':
         if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
             rank = int(os.environ["RANK"])
@@ -352,7 +353,15 @@ if __name__ == "__main__":
             # cpu case
             torch.distributed.init_process_group(backend="gloo", world_size=world_size, rank=rank)
             device = "cpu"
-        for i, c in enumerate(init.app):
+        for i, c in enumerate(app):
+            # TODO: should be moved to top, but it's defined at the config level, and not the app level
+            if c.seed is not None:
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = False
+                seed = c.seed+rank
+                torch.manual_seed(seed)
+                np.random.seed(seed)
+            
             if 'RANK' not in  os.environ or int(os.environ['RANK']) == 0 :
                 dir = Path(c.out)
                 dir.mkdir(exist_ok=True, parents=True)
@@ -369,10 +378,10 @@ if __name__ == "__main__":
 
     elif args.subcommand == "plot":
         # dataloader_generator,data_processor,decoder_handler = load_pia(device='cpu', skip_model=True)
-        for c in init.app:
+        for c in app:
             plot(c)
     elif args.subcommand == "eval":
-        eval_(init.app, init.eval.out_file)
+        eval_(app, init.eval.out_file)
     else:
         raise ValueError(f"Unknown subcommand {args.subcommand}")
 

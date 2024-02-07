@@ -783,18 +783,20 @@ class DecoderEventsHandler(Handler):
                         # NOTE: avoid end token to be written in the middle tokens
                         warn('This is very unreadable, and should be refactored')
                         event_indices[batch_indices[is_last_token_end]] -= 1
+                        time_shifs_idx = x[batch_indices, event_indices[batch_indices],3]
                         # NOTE: we probably don't need to remove since it's decremented ^^
                         # batch_indices = batch_indices[~is_last_token_end]
 
                         emb = torch.nn.Embedding.from_pretrained(
                             torch.FloatTensor(
                                 [self.dataloader_generator.dataset.index2value['time_shift'][i] for i in range(104)] 
-                                + 3*[0.0] # FOR Padding (XX), Start and End tokens, we add a timeshift of 0.0 but we should in general check...
+                                + 4*[0.0] # FOR Padding (XX), Start, End, placeholder tokens, we add a timeshift of 0.0 but we should in general check...
                             )[:,None],
                             freeze=True
                         ) 
                         # .to(samples.device)
-                        time_shifs_idx = samples[~is_last_token_end, 3]
+                        # time_shifs_idx = samples[~is_last_token_end, 3]
+                        # time_shifs_idx = samples[batch_indices, 3]
                         # warn('This will eventually fail if some idx are not there....') 
                         time_shifts = emb(time_shifs_idx.cpu())[:,0]
                         # NOTE: keep accumulated, but we could instead keep diffs.

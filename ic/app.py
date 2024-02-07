@@ -1,4 +1,5 @@
 import hashlib
+from typing import Optional
 from CIA.ic import Experiment, SamplingConfig
 
 
@@ -16,6 +17,7 @@ class Config:
     samples_per_template: int
     logging: str
     experiment: Experiment
+    seed: Optional[int] = None
     def __post_init__(self):
         # TODO: exp uniquely identifies where
         exp_folder = hashlib.sha256(str(self.experiment).encode('utf-8')).hexdigest()

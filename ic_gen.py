@@ -187,8 +187,9 @@ def post_process_temp(
             middle_tokens_temp = res_temp.tok[decoding_start:res_temp.decoding_end-1]
             sequence = torch.cat([before, middle_tokens_temp, after], axis=0)
         shift_to_time = dataloader_generator.dataset.index2value['time_shift']
+        # NOTE: disable the padding tokens 
         time_before = torch.sum(torch.tensor(
-                [shift_to_time[tok[3].item()] for tok in before]
+                [shift_to_time[tok[3].item()] for tok in before if isinstance(shift_to_time[tok[3].item()], float)]
             ), dim=0).item()
         if res_temp.timepoints is not None:
             res_temp.timepoints += time_before
@@ -214,7 +215,7 @@ def post_process_gen(
     dataloader_generator.write(s, gen_midi.parent.joinpath(gen_midi.stem))
     shift_to_time = dataloader_generator.dataset.index2value['time_shift']
     time_before = torch.sum(torch.tensor(
-        [shift_to_time[tok[3].item()] for tok in before]
+        [shift_to_time[tok[3].item()] for tok in before if isinstance(shift_to_time[tok[3].item()], float)]
     ), dim=0).item()
     res_gen.timepoints += time_before
     res_gen.timepoints_int += time_before
@@ -358,7 +359,7 @@ if __name__ == "__main__":
                 args_exp = copy.copy(args)
                 args_exp.app = [args.app[i]]
                 parser.save(args_exp, dir.joinpath('config.yaml'), overwrite=True)
-            print(f'Experiment: {c.experiment}\n Sampling Config: {c.sampling_config}')
+            print(f'Experiment: {c.experiment}\n Sampling Config: {c.sampling_config}, folder: {c.out}')
             gen(c, device=device)
             # NOTE: allow the processes to finish before plotting
             if torch.distributed.is_initialized():

@@ -116,10 +116,15 @@ def plot(c : Config, sr : int = 25):
             fig_plotly.update_xaxes(tickformat="%M:%S.%3f")
             fig_plotly.update_layout(height=fig_height, xaxis=dict(range=[crop_start_time, crop_end_time]))
             html_file = sample.parent.joinpath(f'{metric_name}_curve.html')
-            html = fig_plotly.to_html()
+            html = fig_plotly.to_html(
+                include_plotlyjs='cdn'
+            )
             soup = BeautifulSoup(html, features="html.parser")
             audio_elems = [soup.new_tag('audio', controls=True, src=audio_file) for audio_file in audio_files]
-            soup.div.insert_before(*audio_elems)
+            div = soup.new_tag('div', style="position: -webkit-sticky;position: sticky;top: 0;padding: 5px; z-index:1000;")
+            for i, e in enumerate(audio_elems):
+                div.insert(i,e)
+            soup.div.insert_before(div)
             with open(html_file, 'w') as file:
                 file.write(soup.prettify())
 def get_figure(metric):
@@ -144,7 +149,7 @@ def get_figure(metric):
 
 def plot_metric_dev(res_gen : ICRes, metric_name, fig_plotly, times_int_summed, metric_dev_fig_row):
     metric_dev = res_gen.ic_dev
-    metric_dev_mean = metric_dev.mean().item()
+    metric_dev_mean = metric_dev.abs().mean().item()
     express_to_suplot(fig_plotly, px.line(x=times_int_summed, y=metric_dev, line_shape='hv', labels=dict(x="Time", y=f"{metric_name} Deviation", color="Channel")), row=metric_dev_fig_row, col=1)
     fig_plotly.layout.annotations[10]['text'] = f"{metric_name} Deviation, mean={metric_dev_mean}"
 

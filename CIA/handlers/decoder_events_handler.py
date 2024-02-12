@@ -568,8 +568,6 @@ class DecoderEventsHandler(Handler):
         piece: Piece,
         sampling_config : SamplingConfig,
         experiment: Experiment,
-        top_p=1.0,
-        top_k=0,
         num_max_generated_events=None,
         regenerate_first_ts=False,
     ):
@@ -614,7 +612,8 @@ class DecoderEventsHandler(Handler):
             interpolator_template = Interpolator(
                 metric_times=[timepoints_tok_template],
                 metric=[metric_tok_template],
-                weight_fn=weight_fn
+                weight_fn=weight_fn,
+                metric_clip = experiment.metric_clip_,
             )
         else:
             timepoints_tok_template = None
@@ -645,7 +644,7 @@ class DecoderEventsHandler(Handler):
             # TODO: deprecate this is actually part of the weighting....
             # NOTE: for now we just compute the abs of the sum of all channels
             # bz, T, channels
-            return (ic_int.sum(-1) - ic_int_temp.sum(-1)).abs()
+            return (ic_int.sum(-1) - ic_int_temp.sum(-1))
         with torch.no_grad():
             # event_index corresponds to the position of the token BEING generated
             # for event_index in range(decoding_start_event, num_events):
@@ -733,16 +732,17 @@ class DecoderEventsHandler(Handler):
                                 t = 1.0
                             logits = weights / t
 
+                            # NOTE: this is inefficient, and could be done just with batching...
                             # Filter logits
-                            # filtered_logits = []
-                            # for logit in logits:
+                            filtered_logits = []
+                            for logit in logits:
 
-                            #     filter_logit = top_k_top_p_filtering(
-                            #         logit, top_k=top_k, top_p=top_p
-                            #     )
-                            #     filtered_logits.append(filter_logit)
-                            # filtered_logits = torch.stack(filtered_logits, dim=0)
-                            filtered_logits = logits
+                                filter_logit = top_k_top_p_filtering(
+                                    logit, top_k=sampling_config.top_k, top_p=sampling_config.top_p
+                                )
+                                filtered_logits.append(filter_logit)
+                            filtered_logits = torch.stack(filtered_logits, dim=0)
+                            # filtered_logits = logits
                             # Sample from the filtered distribution
                             # NOTE: lexicon: disable some problematic tokens
                             if channel_index == 0:
@@ -755,12 +755,15 @@ class DecoderEventsHandler(Handler):
                                 start_idx = self.dataloader_generator.dataset.value2index['time_shift'][START_SYMBOL]
                                 filtered_logits[:, start_idx] = float('-inf')
 
-                            pt = torch.softmax(filtered_logits, dim=-1)
-                            samples = pt.multinomial(num_samples=1)[:,0]
+                            filtered_p = torch.softmax(filtered_logits, dim=-1)
+                            p = torch.softmax(weights, dim=-1)
+                            samples = filtered_p.multinomial(num_samples=1)[:,0]
                             channels = torch.tensor(len(batch_indices)*[channel_index])
                             x[batch_indices, event_indices[batch_indices], channels] = samples
-                            ics[batch_indices, event_indices[batch_indices], channels] = -pt[torch.arange(len(samples)), samples].log().cpu()
+                            ics[batch_indices, event_indices[batch_indices], channels] = -p[torch.arange(len(samples)), samples].log().cpu()
                             entrs[batch_indices, event_indices[batch_indices], channels] = numerial_stable_softmax_entr(filtered_logits, dim=-1).sum(dim=-1).cpu()
+                            # max_ic[batch_indices, event_indices[batch_indices], channels] = 
+                            # min_ic = 
                         # # generated_duration
                         end_symbol_idx = torch.tensor([
                                         self.dataloader_generator.dataset.value2index[
@@ -781,7 +784,7 @@ class DecoderEventsHandler(Handler):
                         stop_outer_idx = batch_indices[stop_outer].tolist()
                         completed[stop_outer_idx] = True
                         # NOTE: avoid end token to be written in the middle tokens
-                        warn('This is very unreadable, and should be refactored')
+                        # warn('This is very unreadable, and should be refactored')
                         event_indices[batch_indices[is_last_token_end]] -= 1
                         time_shifs_idx = x[batch_indices, event_indices[batch_indices],3]
                         # NOTE: we probably don't need to remove since it's decremented ^^
@@ -822,6 +825,7 @@ class DecoderEventsHandler(Handler):
                         metric_times = ic_times_list,
                         metric = metric_list,
                         weight_fn = weight_fn,
+                        metric_clip = experiment.metric_clip_,
                     )
                     # NOTE: We pick out the end-points for the current time-step and the next and split that in a smaller resolutions
                     # raise NotImplementedError('Here there\'s likely a bug, since we always return the "previous" timestep')
@@ -829,12 +833,13 @@ class DecoderEventsHandler(Handler):
                     # int_time = interpolator(ts).mean(dim=1, keepdims=True)
                     int_time = interpolator(ts)
                     int_time_temp = interpolator_template(ts)
-                    abs_diffs = ic_curve_dev(int_time, int_time_temp)
+                    diffs = ic_curve_dev(int_time, int_time_temp)
+                    abs_diffs = diffs.abs()
                     # mean over T, to be in sensitive to number of points
                     abs_diffs = abs_diffs.mean(-1)
                     _, best_index_all = abs_diffs.min(dim=0)
                     # TODO: remove the termination from here to reduce spaghetti code
-                    ic_dev = abs_diffs[best_index_all].item()
+                    ic_dev = diffs[best_index_all].sum(-1).item()
                     if completed.all() or time_points_generator.done():
                         # or isinstance(time_points_generator, SingleNoteTimepoints) and done.any(-1).any() :
                         # if isinstance(time_points_generator, SingleNoteTimepoints) and done.any(-1).any() :

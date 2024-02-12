@@ -134,9 +134,6 @@ def gen(c : Config, device='cpu'):
                 experiment=c.experiment,
                 metadata_dict=metadata_dict,
                 piece=piece,
-                top_p=1.0,
-                top_k=0,
-                
                 # num_max_generated_events=num_max_generated_events
                 num_max_generated_events=None
             )

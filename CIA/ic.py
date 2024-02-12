@@ -174,11 +174,18 @@ class Interpolator(ICCurve):
     metric_times : Iterable[torch.FloatTensor]
     metric: Iterable[torch.FloatTensor] 
     weight_fn: Callable[[torch.FloatTensor], torch.FloatTensor]
+    metric_clip:  Optional[torch.FloatTensor]= None
     def __post_init__(self):
         lens = [len(ic) for ic in self.metric]
         assert all(l == len(ic) for l, ic in zip(lens, self.metric))
         self.metric_times = torch.nn.utils.rnn.pad_sequence(self.metric_times, batch_first=True)[..., None]
         self.metric = torch.nn.utils.rnn.pad_sequence(self.metric, batch_first=True)
+        # self.metric = min(self.metric, self.metric_cap)
+        if self.metric_clip is None:
+            warn('Most likely a cap needs to be set. For instance by calculating quantile .95')
+        else:
+            # torch.as_tensor(self.metric_clip, dtype=torch.float32)
+            self.metric = torch.where(self.metric > self.metric_clip, self.metric_clip, self.metric)
         assert self.metric_times.dim() == 4 and self.metric.dim() == 3 # bz, tokens, channels, (t=1?)
 
     def __call__(self, t : torch.FloatTensor) -> torch.FloatTensor:
@@ -287,7 +294,9 @@ def unique_timepoints(onsets : torch.Tensor, ics : torch.Tensor):
     return unique_timepoint, cum_ics
 def numerial_stable_softmax_entr(logits, dim=-1):
     p = torch.nn.functional.softmax(logits, dim=dim)
-    return -(p * torch.nn.functional.log_softmax(logits, dim=dim))
+    logp = torch.nn.functional.log_softmax(logits, dim=dim)
+    # NOTE: define that when p==0, then we return 0...
+    return -torch.where(p>0 , p * logp, p)
 
 @dataclass
 class Data(Iterable[Tuple[torch.LongTensor, str, int, Optional[Piece]]]):
@@ -392,13 +401,18 @@ class Experiment:
     dataset : Data
     ic_curve: Optional[ICCurve]
     match_metric: str = 'ic'
+    # metric_clip: Optional[torch.FloatTensor] = None
+    metric_clip: Optional[List[float]] = None
     onset_on_next_note: bool = True
     # NOTE: here we should have either the test set, or some named collection of pieces....
     def __post_init__(self):
         assert self.match_metric in ['ic', 'typicality']
+        self.metric_clip_ = torch.FloatTensor(self.metric_clip) if self.metric_clip is not None else None
 
 
 @dataclass
 class SamplingConfig:
     k_traces: int
     temperature: float
+    top_p: float = 0.0
+    top_k: int = 0

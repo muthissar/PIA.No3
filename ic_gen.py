@@ -41,30 +41,69 @@ def gen(c : Config, device='cpu'):
     for original_x, piece_name, n_inpaint, end_window, piece in tqdm.tqdm(c.experiment.dataset, desc='Pieces completed', disable=rank != 0, position=0, leave=True):
         piece_folder = c.out.joinpath(piece_name)
         piece_folder.mkdir(exist_ok=True, parents=True)
+        
+        if isinstance(n_inpaint, float):
+            rest = original_x[
+                :, data_processor.num_events_before : 
+            ]
+            # TODO: rewrite for clearness, removes padding
+            rest_ = rest[:, rest[0,:,3] != 105, :]
+            if rest_.numel() == 0:
+                logger.error(f"Skipping {piece_name} since its all padding")
+                continue
+            durations = dataloader_generator.get_elapsed_time(rest_)
+            n_inpaint_ = (durations[0]-n_inpaint).abs().argmin().item()
+            if n_inpaint_ <= 1 or (durations == 0).all():
+                logger.error(f"Skipping {piece_name} since it has no duration")
+                continue
+        elif isinstance(n_inpaint, (int, np.integer)):
+            n_inpaint_ = n_inpaint
+
+        x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=n_inpaint_)
+        placeholder_duration = metadata_dict['placeholder_duration'].item()
+            
+
+        timepoints_tok_template, template_inpaint_end, ic_tok_template, entr_tok_template = decoder_handler.compute_token_onsets(
+            x=metadata_dict['original_sequence'],
+            metadata_dict=metadata_dict,
+            onset_on_next_note = c.experiment.onset_on_next_note
+        )
+        # TODO: Should not necessarily be the case, but for now we assign events to the first timepoint
+        if c.experiment.match_metric == 'ic':
+            metric_tok_template = ic_tok_template
+        elif c.experiment.match_metric == 'typicality':
+            metric_tok_template = entr_tok_template - ic_tok_template
+        # warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
+        # TODO: 'Most likely, we would actually need to start sampling with a shift, if first note should not always align.'
+        interpolation_template = Interpolator(
+            metric_times=[timepoints_tok_template],
+            metric=[metric_tok_template],
+            weight_fn=c.experiment.weight,
+            metric_clip = c.experiment.metric_clip_,
+            reduce_equal_times = c.experiment.reduce_equal_times,
+        )
+        if c.experiment.ic_curve is None:
+            ic_match_curve = interpolation_template
+            timepoints_tok_match_curve = timepoints_tok_template
+            ic_tok_match_curve = ic_tok_template
+            entr_tok_match_curve = entr_tok_template
+            match_curve_inpaint_end =  template_inpaint_end 
+        else:
+            ic_match_curve = c.experiment.ic_curve
+            timepoints_tok_match_curve = None
+            ic_tok_match_curve = None
+            entr_tok_match_curve = None
+            match_curve_inpaint_end = placeholder_duration
+        
         for i in tqdm.tqdm(np.arange(rank, c.samples_per_template, world_size), desc='sample pr piece', disable=rank != 0, position=1, leave=False):
             gen_folder = piece_folder.joinpath(f'{i}')
             gen_folder.mkdir(exist_ok=True, parents=True)
             gen_file = gen_folder.joinpath(f'ic.pt')
             if gen_file.exists():
                 continue
-            if isinstance(n_inpaint, float):
-                rest = original_x[
-                    :, data_processor.num_events_before : 
-                ]
-                # TODO: rewrite for clearness, removes padding
-                rest_ = rest[:, rest[0,:,3] != 105, :]
-                if rest_.numel() == 0:
-                    logger.error(f"Skipping {piece_name} since its all padding")
-                    continue
-                durations = dataloader_generator.get_elapsed_time(rest_)
-                n_inpaint_ = (durations[0]-n_inpaint).abs().argmin().item()
-                if n_inpaint_ <= 1 or (durations == 0).all():
-                    logger.error(f"Skipping {piece_name} since it has no duration")
-                    continue
-            elif isinstance(n_inpaint, (int, np.integer)):
-                n_inpaint_ = n_inpaint
-            x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=n_inpaint_)
-            placeholder_duration = metadata_dict['placeholder_duration'].item()
+            # NOTE: might not be necessary to clone/copy
+            x = x.clone()
+            metadata_dict = copy.deepcopy(metadata_dict)
             # ts = c.experiment.time_points_generator(x, metadata_dict)
             # TODO: jsonargparse hack since placeholder_duration is not available at initialization time.
             c.experiment.time_points_generator.initialize(placeholder_duration)
@@ -72,37 +111,9 @@ def gen(c : Config, device='cpu'):
             # TODO: ugly to check like this. Alternatively we could require that
             # the times are always relative. However, would be problematic for matching,
             # since the absolute time differences are important for the scaling.
-            if c.experiment.ic_curve is None:
-                timepoints_tok_template, template_inpaint_end, ic_tok_template, entr_tok_template = decoder_handler.compute_token_onsets(
-                    x=metadata_dict['original_sequence'],
-                    metadata_dict=metadata_dict,
-                    onset_on_next_note = c.experiment.onset_on_next_note
-                )
-                # TODO: Should not necessarily be the case, but for now we assign events to the first timepoint
-                if c.experiment.match_metric == 'ic':
-                    metric_tok_template = ic_tok_template
-                elif c.experiment.match_metric == 'typicality':
-                    metric_tok_template = entr_tok_template - ic_tok_template
-                # warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
-                # TODO: 'Most likely, we would actually need to start sampling with a shift, if first note should not always align.'
-                interpolator_template = Interpolator(
-                    metric_times=[timepoints_tok_template],
-                    metric=[metric_tok_template],
-                    weight_fn=c.experiment.weight,
-                    metric_clip = c.experiment.metric_clip_,
-                    reduce_equal_times = c.experiment.reduce_equal_times,
-                )
-            else:
-                if isinstance(c.experiment.ic_curve, DrawnICCurve):
-                    ic_curve : DrawnICCurve = c.experiment.ic_curve
-                    ic_curve.set_placeholder_length(placeholder_duration)
-                interpolator_template = c.experiment.ic_curve
-                timepoints_tok_template = None
-                ic_tok_template = None
-                entr_tok_template = None
-                # TODO: should this rather be part of time_points_generator?
-                # template_inpaint_end = interpolator_template.inpaint_end
-                template_inpaint_end = placeholder_duration
+            if isinstance(c.experiment.ic_curve, DrawnICCurve):
+                ic_curve : DrawnICCurve = c.experiment.ic_curve
+                ic_curve.set_placeholder_length(placeholder_duration)
             original_sequence = x.detach().cpu().clone()
             gen = decoder_handler.inpaint_ic_curve(
                 x=x.clone(),
@@ -111,21 +122,21 @@ def gen(c : Config, device='cpu'):
                 metadata_dict=metadata_dict,
                 piece=piece,
                 num_max_generated_events=None,
-                interpolator_template=interpolator_template,
+                interpolator_template=ic_match_curve,
             )
             interpolation_time_points = gen.timepoints_int.clone()
-            ic_int_temp = interpolator_template(interpolation_time_points[None])[0]
+            ic_int_temp = ic_match_curve(interpolation_time_points[None])[0]
 
             temp = ICRes(
                 tok = original_sequence[0],
-                ic_tok = ic_tok_template,
-                entr_tok = entr_tok_template,
-                timepoints = timepoints_tok_template,
+                ic_tok = ic_tok_match_curve,
+                entr_tok = entr_tok_match_curve,
+                timepoints = timepoints_tok_match_curve,
                 ic_int = ic_int_temp,
                 timepoints_int = interpolation_time_points,
                 decoding_end=metadata_dict["decoding_end"].item(),
                 piece = piece,
-                inpaint_end = template_inpaint_end
+                inpaint_end = match_curve_inpaint_end
             )
 
             

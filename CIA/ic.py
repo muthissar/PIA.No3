@@ -95,7 +95,8 @@ class FixedStepTimepoints(TimepointsGenerator):
         # super().__post_init__()
         assert (self.step / self.eval_step).is_integer()
     def initialize(self, placholder_duration : float):
-        self.current_step = 0   
+        # self.current_step = 0   
+        self.current_step = 1   
         self.placeholder_duration = placholder_duration
         self.next_time_traces = torch.zeros(self.k_traces)
     def update_is_exceeded(self, t : torch.FloatTensor, idx : int) -> bool:
@@ -108,12 +109,13 @@ class FixedStepTimepoints(TimepointsGenerator):
     def done(self) -> bool:
         return self.current_step * self.step >= self.placeholder_duration
     def update_step(self, idx :int) -> None:
-        # self.current_step += 1
+        # NOTE: IN case multiple steps are skipped
+        assert self.next_time_traces[idx] > self.current_step * self.step
         new_step = int(self.next_time_traces[idx] // self.step)
         crossings = new_step - self.current_step
-        if crossings > 2:
+        if crossings > 1:
             warn(f'Skipped {crossings} steps, which ammounts to {crossings * self.step} seconds.')
-        self.current_step = new_step
+        self.current_step = max(new_step, self.current_step+1)
     def progress(self) -> Tuple[int, int]:
         '''
         Returns the (rounded) current number of secs generated and the total number of secs to be generated

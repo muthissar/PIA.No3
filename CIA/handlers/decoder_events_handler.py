@@ -590,18 +590,10 @@ class DecoderEventsHandler(Handler):
         batch_size, num_events, n_feats = x.size()
         # TODO only works with batch_size=1 at present
         assert x.size(0) == 1
-        index2value = self.dataloader_generator.dataset.index2value
-        placeholder_duration = metadata_dict["placeholder_duration"].item()
-        # generated_duration = torch.zeros(sampling_config.k_traces, *x.shape[1:])
         accumulated_shifts = torch.zeros(sampling_config.k_traces, x.shape[1])
         decoding_start_event = metadata_dict["decoding_start"]
-        template_decoding_end = metadata_dict["decoding_end"].item()
-        # NOTE: copy the original sequence:
-        original_sequence = x.detach().cpu().clone()
         x = x.detach().clone()
-        # TODO: deprecate all instances of setting original_sequence
         # NOTE: this is only for the middle tokens!
-        warn('Refactor!')
         onset_on_next_note = experiment.onset_on_next_note                     
         # TODO: 'It does not make sense to limit the number of tokens that we can resample.')
         if num_max_generated_events is not None:
@@ -748,13 +740,6 @@ class DecoderEventsHandler(Handler):
                                         if sampling_config.n_poly_notes == 0 or e_idx - decoding_start_event >=  sampling_config.n_poly_notes and \
                                             (events[e_idx-sampling_config.n_poly_notes:e_idx][:, None] == zero_shift_idx[None]).any(-1).all():
                                             filtered_logits[i, zero_shift_idx] = float('-inf')
-                                        
-
-
-
-                                    
-                                
-
                             filtered_p = torch.softmax(filtered_logits, dim=-1)
                             p = torch.softmax(weights, dim=-1)
                             samples = filtered_p.multinomial(num_samples=1)[:, 0]

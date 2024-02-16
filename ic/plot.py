@@ -1,5 +1,6 @@
 from pathlib import Path
 from bs4 import BeautifulSoup
+import torch
 from CIA.ic import DataPiece, ICRes
 from ic.app import Config
 import soundfile as sf
@@ -94,7 +95,8 @@ def plot(c : Config, sr : int = 25):
                 # plot image after
                 if result.ic_tok is not None:
                     # entrs_list.append(result.entr_tok.max())
-                    entr = result.entr_tok.numpy().flatten()
+                    # TODO: hardcoded max entropies
+                    entr = (result.entr_tok / torch.log(torch.tensor([91.,131,107,108]))).numpy().flatten()
                     plot_entr(fig_plotly, colors_tok, times_tok, entr, entr_fig_row)
                     
                     # cum_metric_list.append(result.ic_tok.max())    
@@ -148,7 +150,7 @@ def get_figure(metric):
     #         ) ] + [f'{metric} Deviation']
     titles = [title + f" template " for title in (
                 'Piano roll',
-                'Entr tokens',
+                'Normalized Entropy tokens',
                 f'{metric} tokens',
                 f'{metric} Interpolation',
                 f'{metric} Interpolation summed channels'
@@ -157,7 +159,7 @@ def get_figure(metric):
                 f'{metric} Interpolation summed channels'
             ) ]  + [title + f" generated " for title in (
                 'Piano roll',
-                'Entr tokens',
+                'Normalized Entropy tokens',
                 f'{metric} tokens',
                 f'{metric} Interpolation',
                 f'{metric} Interpolation summed channels'
@@ -204,7 +206,7 @@ def plot_entr(fig_plotly, c_, times, entr, entr_figure_row):
                         y=entr,
                         color=c_,
                         # color_discrete_sequence=['red', 'green', 'blue'],
-                        labels=dict(x="Time", y="Entropy", color="Channel"),
+                        labels=dict(x="Time", y="Normalized Entropy", color="Channel"),
                         # color_continuous_scale="plasma",
                         )
     express_to_suplot(fig_plotly, scatter, row=entr_figure_row, col=1)

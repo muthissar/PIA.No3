@@ -1,6 +1,6 @@
 import functools
 import os
-from typing import Callable, Optional, Tuple, Union, Iterable
+from typing import Callable, List, Optional, Tuple, Union, Iterable
 from warnings import warn
 from CIA.dataset_managers.piano_midi_dataset import END_SYMBOL, PAD_SYMBOL, START_SYMBOL
 from CIA.handlers.handler import Handler
@@ -28,23 +28,30 @@ def app_ent(
         entr_target  : torch.Tensor,
         sens : float = 0.1,
         min_temp = 1e-3,
-        max_temp = 1e5
+        max_temp = 1e5,
+        max_iter = 100,
     ) -> torch.Tensor:
     bs = logits.size(0)
     assert bs == entr_target.size(0)
-    assert (entr_target < np.log(logits.size(-1))).all(), f"entr_target: {entr_target} bigger than max entropy."
+    # assert (entr_target < np.log(logits.size(-1))).all(), f"entr_target: {entr_target} bigger than max entropy."
     logits = logits.cpu()
-    curr_temps = torch.tensor(bs*[(min_temp, max_temp)])
-    min_max_temp = numerial_stable_softmax_entr(logits[:, None] / curr_temps[..., None], dim=-1).sum(-1)
-    assert ((min_max_temp < entr_target[:, None]) == torch.tensor([True, False])[None]).all(), "entr_target, not within min/max temp."
-    not_done = torch.tensor(bs*[True])
-    while not_done.any():
+    curr_temps = torch.FloatTensor(bs*[(min_temp, max_temp)])
+    min_max_entr = numerial_stable_softmax_entr(logits[:, None] / curr_temps[..., None], dim=-1).sum(-1)
+    below_min = entr_target <= min_max_entr[:, 0] 
+    curr_temps[below_min, 1] = curr_temps[below_min , 0]
+    above_max = entr_target >= min_max_entr[:, 1]
+    curr_temps[above_max, 0] = curr_temps[above_max, 1]
+    not_done = ~(above_max | below_min)
+    for i in range(max_iter+1):
         temp_mid = curr_temps.sum(dim=-1) / 2
+        if ~not_done.any():
+            return temp_mid
         curr_entr = numerial_stable_softmax_entr(logits/temp_mid[:, None], dim=-1).sum(-1)
         diff = curr_entr - entr_target
         not_done = diff.abs() > sens
         left_mask = diff > 0
         curr_temps[torch.arange(bs)[not_done], left_mask.long()[not_done]] = temp_mid[not_done]
+    temp_mid = curr_temps.sum(dim=-1) / 2
     return temp_mid
 
 # TODO duplicated code with decoder_prefix_handler.py
@@ -614,6 +621,7 @@ class DecoderEventsHandler(Handler):
                 metric=[metric_tok_template],
                 weight_fn=weight_fn,
                 metric_clip = experiment.metric_clip_,
+                reduce_equal_times = experiment.reduce_equal_times,
             )
         else:
             timepoints_tok_template = None
@@ -640,11 +648,11 @@ class DecoderEventsHandler(Handler):
         completed = torch.zeros((sampling_config.k_traces), dtype=torch.bool, device='cpu')
         first_time_expand = True
         best_index = 0
-        def ic_curve_dev(ic_int, ic_int_temp):
+        def ic_curve_dev(ic_int : List[torch.FloatTensor], ic_int_temp : List[torch.FloatTensor]):
             # TODO: deprecate this is actually part of the weighting....
             # NOTE: for now we just compute the abs of the sum of all channels
             # bz, T, channels
-            return (ic_int.sum(-1) - ic_int_temp.sum(-1))
+            return [ic_int_.sum(-1) - ic_int_temp_.sum(-1) for ic_int_, ic_int_temp_ in zip(ic_int, ic_int_temp)]
         with torch.no_grad():
             # event_index corresponds to the position of the token BEING generated
             # for event_index in range(decoding_start_event, num_events):
@@ -656,8 +664,6 @@ class DecoderEventsHandler(Handler):
                     # NOTE: loop inner, we either branch or expand continuoations. Actually that's generate 
                     # until criterion where we can measue the points.
                     while first_time_expand or len(batch_indices) > 0:
-                        # NOTE: choose best trace and expand that.
-                        event_indices[batch_indices] += 1
                         # event_indices[not_done] += 1
                         if first_time_expand:
                             # NOTE indices the sequences which did not yet exceed the timepoint prune limit
@@ -669,7 +675,8 @@ class DecoderEventsHandler(Handler):
                             x[not_done] = x[best_index]
                             ics[not_done] = ics[best_index]
                             entrs[not_done] = entrs[best_index]
-                    
+                            # NOTE: choose best trace and expand that.
+                            event_indices[batch_indices] += 1
                             # TODO: why does it only work with full sequence lenght?
                             # output is used to generate auto-regressively all
                             # channels of an event
@@ -685,6 +692,7 @@ class DecoderEventsHandler(Handler):
                             target_embedded = target_embedded.expand(len(batch_indices), *target_embedded.shape[1:])
                             first_time_expand = False
                         else:
+                            event_indices[batch_indices] += 1
                             x_ = x[batch_indices].contiguous()
                             metadata_dict["original_sequence"] = x_.clone()
                             output_, target_embedded, h_pe = self.compute_event_state(
@@ -722,12 +730,17 @@ class DecoderEventsHandler(Handler):
                             # t = sampling_config.temperature
                             # TODO: hard coded switch to allow for testing out different temperatures, 
                             # but keeping the original functionality when temperature==1.0
-                            if sampling_config.temperature != 1.0:
-                                if channel_index == 0:
-                                    t = 4
-                                if channel_index == 3:
-                                    # t = 0.5
-                                    t = 1.0
+                            if sampling_config.dynamic_temperature_max_ic is not None:
+                                # NOTE: hacky way of achieving next ic.
+                                time_next  = torch.ones((weights.size(0),1))*(time_points_generator.current_step + 1) * time_points_generator.step
+                                ic_next = interpolator_template(time_next)[..., 0, channel_index]
+                                ic_max = sampling_config.dynamic_temperature_max_ic
+                                entr_target = ic_next / ic_max * np.log(weights.size(-1)) 
+                                expected_n_notes_pr_step = 1
+                                ic_next = ic_next / expected_n_notes_pr_step
+                                t = app_ent(logits=weights, entr_target=entr_target)
+                                t = t[:, None].to(device=weights.device)
+
                             else:
                                 t = 1.0
                             logits = weights / t
@@ -754,10 +767,24 @@ class DecoderEventsHandler(Handler):
                                 filtered_logits[:, pad_idx] = float('-inf')
                                 start_idx = self.dataloader_generator.dataset.value2index['time_shift'][START_SYMBOL]
                                 filtered_logits[:, start_idx] = float('-inf')
+                                if sampling_config.n_poly_notes is not None:
+                                    zeroish_shifts = [0.0, 0.02, 0.04]
+                                    zero_shift_idx = torch.tensor([self.dataloader_generator.dataset.value2index['time_shift'][shift] for shift in zeroish_shifts], device=x.device)
+                                    # torch.repeat_interleave(torch.arange(len(batch_indices)), 3)
+                                    for i, (events, e_idx) in enumerate(zip(x[batch_indices, :, 3], event_indices[batch_indices])):
+                                        if sampling_config.n_poly_notes == 0 or e_idx - decoding_start_event >=  sampling_config.n_poly_notes and \
+                                            (events[e_idx-sampling_config.n_poly_notes:e_idx][:, None] == zero_shift_idx[None]).any(-1).all():
+                                            filtered_logits[i, zero_shift_idx] = float('-inf')
+                                        
+
+
+
+                                    
+                                
 
                             filtered_p = torch.softmax(filtered_logits, dim=-1)
                             p = torch.softmax(weights, dim=-1)
-                            samples = filtered_p.multinomial(num_samples=1)[:,0]
+                            samples = filtered_p.multinomial(num_samples=1)[:, 0]
                             channels = torch.tensor(len(batch_indices)*[channel_index])
                             x[batch_indices, event_indices[batch_indices], channels] = samples
                             ics[batch_indices, event_indices[batch_indices], channels] = -p[torch.arange(len(samples)), samples].log().cpu()
@@ -782,7 +809,8 @@ class DecoderEventsHandler(Handler):
 
                         stop_outer = is_last_token_end | (len_exceeded)
                         stop_outer_idx = batch_indices[stop_outer].tolist()
-                        completed[stop_outer_idx] = True
+                        if not isinstance(time_points_generator, SingleNoteTimepoints):
+                            completed[stop_outer_idx] = True
                         # NOTE: avoid end token to be written in the middle tokens
                         # warn('This is very unreadable, and should be refactored')
                         event_indices[batch_indices[is_last_token_end]] -= 1
@@ -826,6 +854,7 @@ class DecoderEventsHandler(Handler):
                         metric = metric_list,
                         weight_fn = weight_fn,
                         metric_clip = experiment.metric_clip_,
+                        reduce_equal_times = experiment.reduce_equal_times,
                     )
                     # NOTE: We pick out the end-points for the current time-step and the next and split that in a smaller resolutions
                     # raise NotImplementedError('Here there\'s likely a bug, since we always return the "previous" timestep')
@@ -834,9 +863,9 @@ class DecoderEventsHandler(Handler):
                     int_time = interpolator(ts)
                     int_time_temp = interpolator_template(ts)
                     diffs = ic_curve_dev(int_time, int_time_temp)
-                    abs_diffs = diffs.abs()
+                    # abs_diffs = diffs.abs()
                     # mean over T, to be in sensitive to number of points
-                    abs_diffs = abs_diffs.mean(-1)
+                    abs_diffs = torch.stack([diff.abs().mean(-1)for diff in diffs])
                     _, best_index_all = abs_diffs.min(dim=0)
                     # TODO: remove the termination from here to reduce spaghetti code
                     ic_dev = diffs[best_index_all].sum(-1).item()
@@ -862,10 +891,16 @@ class DecoderEventsHandler(Handler):
                     # TODO: we could do something like rejection sampling, or use some heuristic search.
                     # time_points_generator.update_step(best_index_all, done[best_index_all].any())
                     time_points_generator.update_step(best_index)
+                    # TODO: hack such that we do not keep anything which terminated
+                    # if isinstance(time_points_generator, SingleNoteTimepoints):
+                    #     completed[stop_outer_idx] = False
+                    completed[:] = False
                     pbar.n = time_points_generator.progress()[0]
                     pbar.set_postfix({'ic_dev': ic_dev})
                     pbar.refresh()
-        interpolation_time_points = time_points_generator.get_all_eval_points()
+
+
+        interpolation_time_points = time_points_generator.get_all_eval_points().expand(sampling_config.k_traces, -1)
         ic_int_temp = interpolator_template(interpolation_time_points)[0]
         temp = ICRes(
             tok = original_sequence[0],
@@ -878,8 +913,6 @@ class DecoderEventsHandler(Handler):
             piece = piece,
             inpaint_end = template_inpaint_end
         )
-        # ic_tok_gen = ics[best_index,decoding_start_event:decoding_end-1].cpu()
-        # entr_gen = entrs[best_index,decoding_start_event:decoding_end-1].cpu()
         ic_tok_gen = ics[best_index,decoding_start_event:decoding_end].cpu()
         entr_gen = entrs[best_index,decoding_start_event:decoding_end].cpu()
         ic_int_gen = interpolator(interpolation_time_points)[best_index_all]
@@ -897,7 +930,7 @@ class DecoderEventsHandler(Handler):
             timepoints_int = interpolation_time_points[0].clone(),
             decoding_end=decoding_end,
             piece = piece,
-            ic_dev = ic_curve_dev(ic_int_gen, ic_int_temp),
+            ic_dev = ic_curve_dev([ic_int_gen], [ic_int_temp])[0],
             inpaint_end  = inpaint_end_gen,
         )
         return temp, gen

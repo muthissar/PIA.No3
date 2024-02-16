@@ -34,16 +34,20 @@ class LinearInterpolation(DrawnICCurve):
         assert len(self.timepoints) == len(self.ics)
         self._timepoints = np.array(self.timepoints)
         self._ics = np.array(self.ics)
-    def __call__(self, t : torch.FloatTensor) -> torch.FloatTensor:
+    def __call__(self, t : List[torch.FloatTensor]) -> List[torch.FloatTensor]:
         # t : bz, T 
+        lens = [len(tt) for tt in t]
+        t = torch.nn.utils.rnn.pad_sequence(t, batch_first=True, padding_value=-1)
         assert t.dim() == 2
-        # t = t.expand(t.shape[0], self._ics.shape[1])
         orig_shape  = t.shape
         t = (t* self._placeholder_scale).numpy()
-        # return torch.tensor(np.stack([np.interp(t, self._timepoints, ics) for ics in self._ics.T], axis=1))[None]
-        # return torch.tensor(np.stack([np.interp(t_, self._timepoints, ics) for t_, ics in zip(t.T, self._ics.T)], axis=-1))
-        res = torch.tensor(np.stack([np.interp(t.flatten(), self._timepoints, ics) for ics in self._ics.T], axis=-1))
-        return res.view(*orig_shape, -1)
+        res = torch.FloatTensor(np.stack([np.interp(t.flatten(), self._timepoints, ics) for ics in self._ics.T], axis=-1))
+        res = res.view(*orig_shape, -1)
+        res = [r[:l] for r, l in zip(res, lens)]
+        return res
+        # res = torch.tensor(np.stack([np.interp(t* self._placeholder_scale, self._timepoints, ics) for ics in self._ics.T], axis=-1))
+        # return res.view(*orig_shape, -1)
+
 @dataclass
 class Piecewise(DrawnICCurve):
     # NOTE alternatively scipy.interpolate.interp1d(x, y, kind='nearest'), but it's deprecated
@@ -85,6 +89,7 @@ class TimepointsGenerator:
 class FixedStepTimepoints(TimepointsGenerator):
     step : float
     eval_step: float
+    k_traces : int = field(repr=False)
     tol_placeholder_duration : float = field(repr=False, default=0.2)
     def __post_init__(self):
         # super().__post_init__()
@@ -92,16 +97,23 @@ class FixedStepTimepoints(TimepointsGenerator):
     def initialize(self, placholder_duration : float):
         self.current_step = 0   
         self.placeholder_duration = placholder_duration
+        self.next_time_traces = torch.zeros(self.k_traces)
     def update_is_exceeded(self, t : torch.FloatTensor, idx : int) -> bool:
         '''
         Times
         '''
         # return t >= self.current_step * self.step
+        self.next_time_traces[idx] = t
         return t > self.current_step * self.step
     def done(self) -> bool:
         return self.current_step * self.step >= self.placeholder_duration
     def update_step(self, idx :int) -> None:
-        self.current_step += 1
+        # self.current_step += 1
+        new_step = int(self.next_time_traces[idx] // self.step)
+        crossings = new_step - self.current_step
+        if crossings > 2:
+            warn(f'Skipped {crossings} steps, which ammounts to {crossings * self.step} seconds.')
+        self.current_step = new_step
     def progress(self) -> Tuple[int, int]:
         '''
         Returns the (rounded) current number of secs generated and the total number of secs to be generated
@@ -109,10 +121,20 @@ class FixedStepTimepoints(TimepointsGenerator):
         return round(self.current_step * self.step), round(self.placeholder_duration)
     def get_eval_points(self):
         if self.current_step == 0:
-            ts = torch.tensor([0.0])
+            ts = self.k_traces*[torch.tensor([0.0])]
         else:
-            ts = torch.arange((self.current_step-1) * self.step, self.current_step * self.step, self.eval_step)
-        return ts[None]
+            ts = []
+            for next_time_trace in self.next_time_traces:
+                e = 1e-9
+                # NOTE: overshoot next_time_trace - (self.current_step) * self.step
+                ts_ = torch.arange((self.current_step-1) * self.step, next_time_trace-e, self.eval_step)
+                # if len(ts_) == 0 or ts_[-1] != next_time_trace:
+                #     ts_ = torch.cat([ts_, torch.tensor([next_time_trace])])
+                ts.append(ts_)
+
+            # ts = torch.arange((self.current_step-1) * self.step, self.current_step * self.step, self.eval_step)
+        # return ts[None]
+        return ts
     def get_all_eval_points(self):
         return torch.arange(0, self.placeholder_duration, self.eval_step)[None]
         
@@ -122,6 +144,7 @@ class SingleNoteTimepoints(TimepointsGenerator):
     #     # assert (self.step / self.eval_step).is_integer()
     #     self.best_times = [0.0]
     k_traces : int = field(repr=False)
+    eval_step: float = field(repr=False, default=0.1)
     tol_placeholder_duration : float = field(repr=False, default=0.2)
     def initialize(self, placholder_duration : float):
         # self.current_time = 0.0
@@ -151,7 +174,7 @@ class SingleNoteTimepoints(TimepointsGenerator):
         Returns the (rounded) current number of secs generated and the total number of secs to be generated
         '''
         return round(self.best_times[-1] if len(self.best_times) else 0.), round(self.placeholder_duration)
-    def get_eval_points(self):
+    def get_eval_points(self) -> List[torch.FloatTensor]:
         # if len(self.best_times) == 0:
         #     ts = torch.zeros(self.k_traces, 1)
         # else:
@@ -161,11 +184,19 @@ class SingleNoteTimepoints(TimepointsGenerator):
         # NOTE: quite inefficient, because in principle it would be enough to only use 
         # next_time_traces, because we always expand from the note before. However, for times where the sequence is done, 
         # we need to evaluate in the extra points. Can  we simply get rid of choosing the done sequences?
-        ts = torch.cat([torch.tensor(self.best_times)[None].expand(self.k_traces, -1), self.next_time_traces[:, None]], dim=1)
+        # ts = torch.cat([torch.tensor(self.best_times)[None].expand(self.k_traces, -1), self.next_time_traces[:, None]], dim=1)
+        # ts = self.next_time_traces[:, None]
+        ts = []
+        for next_time_trace in self.next_time_traces:
+            ts_ = torch.arange(self.best_times[-1], next_time_trace, self.eval_step)
+            if len(ts_) == 0 or ts_[-1] != next_time_trace:
+                ts_ = torch.cat([ts_, torch.tensor([next_time_trace])])
+            ts.append(ts_)
         return ts
     def get_all_eval_points(self):
         # return torch.arange(0, self.placeholder_duration, self.eval_step)
         return torch.tensor(self.best_times)[None]
+        # return torch.tensor([[self.best_times[-1]]])
 
 
 
@@ -175,11 +206,30 @@ class Interpolator(ICCurve):
     metric: Iterable[torch.FloatTensor] 
     weight_fn: Callable[[torch.FloatTensor], torch.FloatTensor]
     metric_clip:  Optional[torch.FloatTensor]= None
+    reduce_equal_times: str = 'sum' # 'max', 'mean'
     def __post_init__(self):
         lens = [len(ic) for ic in self.metric]
         assert all(l == len(ic) for l, ic in zip(lens, self.metric))
-        self.metric_times = torch.nn.utils.rnn.pad_sequence(self.metric_times, batch_first=True)[..., None]
+        self.metric_times = torch.nn.utils.rnn.pad_sequence(self.metric_times, batch_first=True)
         self.metric = torch.nn.utils.rnn.pad_sequence(self.metric, batch_first=True)
+        if self.reduce_equal_times in ['max', 'mean']:
+            times_t = einops.rearrange(self.metric_times, 'bz tok chan -> (bz chan) tok')
+            ics_t = einops.rearrange(self.metric, 'bz tok chan -> (bz chan) tok')
+            for times, ics in zip(times_t, ics_t):
+                unique, inverse, count = times.unique( return_inverse=True, return_counts=True)
+                for t,c in zip(unique, count):
+                    time_mask = times==t
+                    max_val, max_idx = ics[time_mask].max(dim=0)
+                    # max
+                    if self.reduce_equal_times == 'max':
+                        ics[time_mask] = max_val/c
+                    else:
+                    # mean
+                        ics[time_mask] /= c
+        elif self.reduce_equal_times != 'sum':
+            raise NotImplementedError
+
+        self.metric_times = self.metric_times[..., None]
         # self.metric = min(self.metric, self.metric_cap)
         if self.metric_clip is None:
             warn('Most likely a cap needs to be set. For instance by calculating quantile .95')
@@ -188,22 +238,27 @@ class Interpolator(ICCurve):
             self.metric = torch.where(self.metric > self.metric_clip, self.metric_clip, self.metric)
         assert self.metric_times.dim() == 4 and self.metric.dim() == 3 # bz, tokens, channels, (t=1?)
 
-    def __call__(self, t : torch.FloatTensor) -> torch.FloatTensor:
-        assert t.dim() == 2 # bz, t
+    def __call__(self, t : List[torch.FloatTensor]) -> List[torch.FloatTensor]:
         #time_diffs = t[None, :, None] - self.ic_times[:, None]
         # time_diffs = einops.rearrange(t, '(bz tok chan t) -> bz tok chan t', bz=1, chan=1, tok=1) - self.metric_times
+        lens = [len(tt) for tt in t]
+        t = torch.nn.utils.rnn.pad_sequence(t, batch_first=True, padding_value=-1)
+        assert t.dim() == 2 # bz, t
         time_diffs = t[:, None, None] - self.metric_times
-        w = self.weight_fn(time_diffs)
+        # rear = einops.rearrange(time_diffs, 'bz obs channels time_eval -> obs (bz channels time_eval)')
+        # hehe = rear.unique(dim=0, return_counts=True)
+        w = self.weight_fn(time_diffs, self.metric)
         w[time_diffs <.0] = 0.
         # NOTE: the ic padding cancels automatically.
         
         metric = self.metric.expand(w.shape[0], *self.metric.shape[1:])
         ret = einops.einsum(w, metric, 'bz tok chan t, bz tok chan -> bz t chan')
-        return ret
+        # return ret
+        return [r[:l] for r, l in zip(ret, lens)]
 
 @dataclass
-class Weight(Callable[[torch.FloatTensor], torch.FloatTensor]):
-    def __call__(self, time_diffs : torch.FloatTensor) -> torch.Tensor:
+class Weight(Callable[[torch.FloatTensor, torch.FloatTensor], torch.FloatTensor]):
+    def __call__(self, time_diffs : torch.FloatTensor, metric_vals : torch.FloatTensor) -> torch.Tensor:
         raise NotImplementedError
 
 @dataclass
@@ -222,8 +277,8 @@ class MovingAverage(Weight):
             self.channel_weight = [self.channel_weight]
         self.c_ = torch.tensor(self.decay)[None, None, :, None] # bz=1, tok=1, channels
         self.cw = torch.tensor(self.channel_weight)[None, None, :, None] # bz=1, tok=1, channels
-    def __call__(self, time_diffs : torch.FloatTensor) -> torch.Tensor:
-        # NOTE: (bz, T, channels, tokens)
+    def __call__(self, time_diffs : torch.FloatTensor, metric_vals : torch.FloatTensor) -> torch.Tensor:
+        # NOTE: (bz, observations, channels, eval_points)
         # NOTE: numerical stability for 0 * inf
         e = 1e-9
         mov_avg = self.cw*(-self.c_*(time_diffs+e)).exp()
@@ -404,6 +459,7 @@ class Experiment:
     # metric_clip: Optional[torch.FloatTensor] = None
     metric_clip: Optional[List[float]] = None
     onset_on_next_note: bool = True
+    reduce_equal_times: str = 'sum'
     # NOTE: here we should have either the test set, or some named collection of pieces....
     def __post_init__(self):
         assert self.match_metric in ['ic', 'typicality']
@@ -413,6 +469,8 @@ class Experiment:
 @dataclass
 class SamplingConfig:
     k_traces: int
-    temperature: float
+    temperature : float
+    n_poly_notes : Optional[int] = None
+    dynamic_temperature_max_ic: Optional[float ] = None
     top_p: float = 0.0
     top_k: int = 0

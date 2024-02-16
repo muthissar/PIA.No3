@@ -124,30 +124,52 @@ def gen(c : Config, device='cpu'):
                 num_max_generated_events=None,
                 interpolator_template=ic_match_curve,
             )
-            interpolation_time_points = gen.timepoints_int.clone()
-            ic_int_temp = ic_match_curve(interpolation_time_points[None])[0]
-
-            temp = ICRes(
+            interpolation_time_points = gen.timepoints_int
+            ic_int_match = ic_match_curve(interpolation_time_points[None])[0]
+            ic_int_temp = interpolation_template(interpolation_time_points[None])[0]
+            
+            match = ICRes(
                 tok = original_sequence[0],
                 ic_tok = ic_tok_match_curve,
                 entr_tok = entr_tok_match_curve,
                 timepoints = timepoints_tok_match_curve,
-                ic_int = ic_int_temp,
-                timepoints_int = interpolation_time_points,
+                ic_int = ic_int_match,
+                timepoints_int = interpolation_time_points.clone(),
                 decoding_end=metadata_dict["decoding_end"].item(),
                 piece = piece,
                 inpaint_end = match_curve_inpaint_end
             )
 
+            temp = ICRes(
+                tok = original_sequence[0],
+                ic_tok = ic_tok_template,
+                entr_tok = entr_tok_template,
+                timepoints = timepoints_tok_template,
+                ic_int = ic_int_temp,
+                timepoints_int = interpolation_time_points.clone(),
+                decoding_end=metadata_dict["decoding_end"].item(),
+                piece = piece,
+                inpaint_end = template_inpaint_end
+            )
+
             
             template_folder = piece_folder.joinpath('temp')
             template_folder.mkdir(exist_ok=True, parents=True)
+            match_folder = piece_folder.joinpath('match')
+            match_folder.mkdir(exist_ok=True, parents=True)
 
             before, after = post_process_temp(
                 dataloader_generator, 
                 data_processor,
                 template_folder,
                 temp,
+                write_template= i == 0 and rank == 0
+            )
+            before, after = post_process_temp(
+                dataloader_generator, 
+                data_processor,
+                match_folder,
+                match,
                 write_template= i == 0 and rank == 0
             )
             decoding_start = data_processor.num_events_after+data_processor.num_events_before+2

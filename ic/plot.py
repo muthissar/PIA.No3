@@ -26,16 +26,19 @@ def plot(c : Config, sr : int = 25):
     # TODO: change all naming to metric
     if not isinstance(c.experiment.dataset, DataPiece):
         warn('Check implimentation, since it is not clear how to handle this case')
-    for temp_file in [f for f in c.out.rglob('*/temp/ic.pt')]:
+    for match_curve_file in [f for f in c.out.rglob('*/match/ic.pt')]:
         # NOTE: since right now we don't pass the dataprocessor, we cannot calculate the exact generated files. 
         # Therefore not to recompute everything plot only those which are not already plotted
-        if temp_file.parent.joinpath(f'{c.experiment.match_metric}_curve.html').exists():
+        if match_curve_file.parent.joinpath(f'{c.experiment.match_metric}_curve.html').exists():
             continue
-        song_dir = temp_file.parent.parent
+        song_dir = match_curve_file.parent.parent
+        res_match = ICRes.load(p=match_curve_file)
+        temp_file = song_dir.joinpath('temp/ic.pt') 
         res_temp = ICRes.load(p=temp_file)
         temp_midi = temp_file.parent.joinpath(f'song.mid')
+        
         for sample in song_dir.rglob('*/ic.pt'):
-            if sample == temp_file:
+            if sample == match_curve_file or sample == temp_file:
                 continue
             res_gen = ICRes.load(p=sample)
             gen_midi = sample.parent.joinpath(f'song.mid')
@@ -44,7 +47,7 @@ def plot(c : Config, sr : int = 25):
             results = [res_temp, res_gen]
             metric_name = c.experiment.match_metric
             metric_name = metric_name.capitalize()
-            figs_pr_sample, fig_plotly = get_figure(metric_name)
+            fig_plotly = get_figure(metric_name)
             
             audio_files = []
             for i, (midi_file, result) in enumerate(zip(midi_files, results)):
@@ -74,6 +77,7 @@ def plot(c : Config, sr : int = 25):
                 colors_tok, colors_int = get_colors(features, n_toks, n_int_points)
                 
                 # NOTE: figure rows
+                figs_pr_sample = 7
                 img_offset = i*figs_pr_sample
                 piano_roll_fig_row = img_offset+1
                 entr_fig_row = img_offset + 2
@@ -96,9 +100,16 @@ def plot(c : Config, sr : int = 25):
                     # cum_metric_list.append(result.ic_tok.max())    
                     metric = result.ic_tok.numpy().flatten()
                     plot_metric(metric, metric_name, fig_plotly, colors_tok, times_tok, metric_fig_row)
+                    
                 express_to_suplot(fig_plotly, px.line(x=times_int.flatten(), y=result.ic_int.flatten(), color=colors_int, line_shape='hv', labels=dict(x="Time", y=metric_name, color="Channel")), row=int_fig_row, col=1)
                 int_summed_channels = result.ic_int.sum(-1)
                 express_to_suplot(fig_plotly, px.line(x=times_int_summed, y=int_summed_channels, line_shape='hv', labels=dict(x="Time", y=metric_name, color="Channel")), row=int_summed_fig_row, col=1)
+                if i == 0:
+                    express_to_suplot(fig_plotly, px.line(x=times_int.flatten(), y=res_match.ic_int.flatten(), color=colors_int, line_shape='hv', labels=dict(x="Time", y=metric_name, color="Channel")), row=int_fig_row+2, col=1)
+                    int_summed_channels = res_match.ic_int.sum(-1)
+                    express_to_suplot(fig_plotly, px.line(x=times_int_summed, y=int_summed_channels, line_shape='hv', labels=dict(x="Time", y=metric_name, color="Channel")), row=int_summed_fig_row+2, col=1)
+
+
             plot_metric_dev(res_gen, metric_name, fig_plotly, times_int_summed, metric_dev_fig_row)
             
             # NOTE update y-axis
@@ -128,8 +139,23 @@ def plot(c : Config, sr : int = 25):
             with open(html_file, 'w') as file:
                 file.write(soup.prettify())
 def get_figure(metric):
-    figs_pr_sample = 5
-    titles = [title + f" {type_}" for type_ in ['template', 'generated'] for title in (
+    # titles = [title + f" {type_}" for type_ in ['template', 'generated'] for title in (
+    #             'Piano roll',
+    #             'Entr tokens',
+    #             f'{metric} tokens',
+    #             f'{metric} Interpolation',
+    #             f'{metric} Interpolation summed channels'
+    #         ) ] + [f'{metric} Deviation']
+    titles = [title + f" template " for title in (
+                'Piano roll',
+                'Entr tokens',
+                f'{metric} tokens',
+                f'{metric} Interpolation',
+                f'{metric} Interpolation summed channels'
+            ) ] + [title + f" match " for title in (
+                f'{metric} Interpolation',
+                f'{metric} Interpolation summed channels'
+            ) ]  + [title + f" generated " for title in (
                 'Piano roll',
                 'Entr tokens',
                 f'{metric} tokens',
@@ -138,14 +164,14 @@ def get_figure(metric):
             ) ] + [f'{metric} Deviation']
 
     fig_plotly = make_subplots(
-                rows=2 * figs_pr_sample + 1,
+                rows=len(titles),
                 cols=1,
                 shared_xaxes=True,
                 vertical_spacing=0.03,
                 subplot_titles=titles,
                 )
         
-    return figs_pr_sample,fig_plotly
+    return fig_plotly
 
 def plot_metric_dev(res_gen : ICRes, metric_name, fig_plotly, times_int_summed, metric_dev_fig_row):
     metric_dev = res_gen.ic_dev

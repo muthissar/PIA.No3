@@ -13,7 +13,7 @@ from CIA.getters import get_handler, get_data_processor, \
     get_sos_embedding
 import time
 import importlib
-from CIA.ic import DrawnICCurve, ICRes
+from CIA.ic import DrawnICCurve, ICRes, Interpolator
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
 from CIA.utils import get_free_port
@@ -68,84 +68,70 @@ def gen(c : Config, device='cpu'):
             # ts = c.experiment.time_points_generator(x, metadata_dict)
             # TODO: jsonargparse hack since placeholder_duration is not available at initialization time.
             c.experiment.time_points_generator.initialize(placeholder_duration)
-            
+
             # TODO: ugly to check like this. Alternatively we could require that
             # the times are always relative. However, would be problematic for matching,
             # since the absolute time differences are important for the scaling.
-            if c.experiment.ic_curve is not None:
+            if c.experiment.ic_curve is None:
+                timepoints_tok_template, template_inpaint_end, ic_tok_template, entr_tok_template = decoder_handler.compute_token_onsets(
+                    x=metadata_dict['original_sequence'],
+                    metadata_dict=metadata_dict,
+                    onset_on_next_note = c.experiment.onset_on_next_note
+                )
+                # TODO: Should not necessarily be the case, but for now we assign events to the first timepoint
+                if c.experiment.match_metric == 'ic':
+                    metric_tok_template = ic_tok_template
+                elif c.experiment.match_metric == 'typicality':
+                    metric_tok_template = entr_tok_template - ic_tok_template
+                # warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
+                # TODO: 'Most likely, we would actually need to start sampling with a shift, if first note should not always align.'
+                interpolator_template = Interpolator(
+                    metric_times=[timepoints_tok_template],
+                    metric=[metric_tok_template],
+                    weight_fn=c.experiment.weight,
+                    metric_clip = c.experiment.metric_clip_,
+                    reduce_equal_times = c.experiment.reduce_equal_times,
+                )
+            else:
                 if isinstance(c.experiment.ic_curve, DrawnICCurve):
                     ic_curve : DrawnICCurve = c.experiment.ic_curve
                     ic_curve.set_placeholder_length(placeholder_duration)
-
-            # # "open ended"
-            # secs_dec = 25.
-            # batch_size = 1
-            # placeholder, placeholder_duration_token = data_processor.compute_placeholder(placeholder_duration=torch.tensor([secs_dec]), batch_size=batch_size)
-            # before = einops.repeat(data_processor.start_tokens, 'd ->b 1 d', b=batch_size)
-            # after = torch.empty(batch_size, 0, placeholder.shape[-1], dtype=torch.long, device=device)
-            # sod =  einops.repeat(data_processor.start_tokens, 'd ->b 1 d', b=batch_size)
-            # query = torch.cat([before, placeholder, after, sod], dim=1)
-            # middle = torch.zeros(batch_size, num_events_middle-1, placeholder.shape[-1], dtype=torch.long, device=device)
-            # end = einops.repeat(data_processor.end_tokens, 'd ->b 1 d', b=batch_size)
-            # padding_len = config['dataloader_generator_kwargs']['sequences_size'] - query.shape[1] - middle.shape[1] - 1
-            # padding = einops.repeat(data_processor.end_tokens, 'd ->b padding d', b=batch_size, padding=padding_len)
-            # x = torch.cat([
-            #     query,
-            #     middle,
-            #     end, 
-            #     padding,
-
-            # ],
-            # axis=1)
-            # metadata_dict = {
-            #     'placeholder_duration': torch.tensor([secs_dec], device=device),
-            #     'decoding_start': query.shape[1],
-            #     # 'decoding_end': query.shape[1] - 1+  num_events_middle,
-            # }
-
-
-            # NOTE: with current setup this corresponds to open ended generation.
-            # [START]  placeholder (programs the model to decode until a certain total time, where the end note is produced)  []  SOD  [m0,m1,...,m9]  END XX XX
-            # NOTE: loss_mask is not used in inpainting, how do we handle attention mask?
-            # metadata_dict.pop('loss_mask')
-            # metadata_dict['decoding_start'] = 0
-            # metadata_dict['decoding_end'] = 1024
-            # NOTE: Here it always attends (!autoregressively!) to full sequence but updates during (autoregressive) decoding.
-            # NOTE: model decodes from decode start and decode up to the next num_events_middle. 
-            # If at one time the placeholder_duration is exceeded, or END symbol, then it terminates with done.
-            # Otherwise it terminates after resampling all events in "middle".
-
-            # NOTE: When generating all channels of a note, the prob is not autoreg, instead the state of previous note is computed, 
-            # and the model is "programed" to generate a certain token in the head, by appending previous computed embeddings to he state
-            # 
-            #  If it did not . We can probably fix this 
-            # by giving a sequence of some mask token, from the beginning. 
-            # k_traces = 128
-            # import torch.autograd.profiler as profiler
-            # with profiler.profile(profile_memory=True, use_cuda=True, record_shapes=True) as prof:
-            # try:
-            (
-                temp,
-                gen
-            ) = decoder_handler.inpaint_ic_curve(
+                interpolator_template = c.experiment.ic_curve
+                timepoints_tok_template = None
+                ic_tok_template = None
+                entr_tok_template = None
+                # TODO: should this rather be part of time_points_generator?
+                # template_inpaint_end = interpolator_template.inpaint_end
+                template_inpaint_end = placeholder_duration
+            original_sequence = x.detach().cpu().clone()
+            gen = decoder_handler.inpaint_ic_curve(
                 x=x.clone(),
-                # interpolation_time_points=ts,
                 sampling_config=c.sampling_config,
                 experiment=c.experiment,
                 metadata_dict=metadata_dict,
                 piece=piece,
-                # num_max_generated_events=num_max_generated_events
-                num_max_generated_events=None
+                num_max_generated_events=None,
+                interpolator_template=interpolator_template,
+            )
+            interpolation_time_points = gen.timepoints_int.clone()
+            ic_int_temp = interpolator_template(interpolation_time_points[None])[0]
+
+            temp = ICRes(
+                tok = original_sequence[0],
+                ic_tok = ic_tok_template,
+                entr_tok = entr_tok_template,
+                timepoints = timepoints_tok_template,
+                ic_int = ic_int_temp,
+                timepoints_int = interpolation_time_points,
+                decoding_end=metadata_dict["decoding_end"].item(),
+                piece = piece,
+                inpaint_end = template_inpaint_end
             )
 
             
             template_folder = piece_folder.joinpath('temp')
             template_folder.mkdir(exist_ok=True, parents=True)
-                
-            # if write_temp:
-            #     # temp.write(file_folder.joinpath(f'ic.pt'))
-            #     # if temp_midi.exists():
-            #     #     continue
+
             before, after = post_process_temp(
                 dataloader_generator, 
                 data_processor,
@@ -153,8 +139,6 @@ def gen(c : Config, device='cpu'):
                 temp,
                 write_template= i == 0 and rank == 0
             )
-            # gen_folder = piece_folder.joinpath(str('temp'))
-            # gen_folder.mkdir(exist_ok=True, parents=True)
             decoding_start = data_processor.num_events_after+data_processor.num_events_before+2
     
             post_process_gen(dataloader_generator, before, after, gen_folder, gen, decoding_start)

@@ -6,7 +6,7 @@ from CIA.dataset_managers.piano_midi_dataset import END_SYMBOL, PAD_SYMBOL, STAR
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 # from CIA.ic import gen_interpolate
-from CIA.ic import Experiment, ICRes, Interpolator, Piece, SamplingConfig, SingleNoteTimepoints, numerial_stable_softmax_entr
+from CIA.ic import Experiment, ICCurve, ICRes, Interpolator, Piece, SamplingConfig, SingleNoteTimepoints, numerial_stable_softmax_entr
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,
@@ -575,13 +575,13 @@ class DecoderEventsHandler(Handler):
         piece: Piece,
         sampling_config : SamplingConfig,
         experiment: Experiment,
+        interpolator_template : ICCurve,
         num_max_generated_events=None,
         regenerate_first_ts=False,
     ):
         # Weighting function used in interpolation
         weight_fn = experiment.weight
         # Ic curve to match (None then will be calculated from template)
-        interpolator_template = experiment.ic_curve
         # 
         time_points_generator = experiment.time_points_generator
         # TODO add arguments to preprocess
@@ -603,33 +603,6 @@ class DecoderEventsHandler(Handler):
         # NOTE: this is only for the middle tokens!
         warn('Refactor!')
         onset_on_next_note = experiment.onset_on_next_note                     
-        if interpolator_template is None:
-            timepoints_tok_template, template_inpaint_end, ic_tok_template, entr_tok_template = self.compute_token_onsets(
-                x=metadata_dict['original_sequence'],
-                metadata_dict=metadata_dict,
-                onset_on_next_note = onset_on_next_note
-            )
-            # TODO: Should not necessarily be the case, but for now we assign events to the first timepoint
-            if experiment.match_metric == 'ic':
-                metric_tok_template = ic_tok_template
-            elif experiment.match_metric == 'typicality':
-                metric_tok_template = entr_tok_template - ic_tok_template
-            # warn('Most likely, we would actually need to start sampling with a shift, if first note should not always align.')
-            # TODO: 'Most likely, we would actually need to start sampling with a shift, if first note should not always align.'
-            interpolator_template = Interpolator(
-                metric_times=[timepoints_tok_template],
-                metric=[metric_tok_template],
-                weight_fn=weight_fn,
-                metric_clip = experiment.metric_clip_,
-                reduce_equal_times = experiment.reduce_equal_times,
-            )
-        else:
-            timepoints_tok_template = None
-            ic_tok_template = None
-            entr_tok_template = None
-            # TODO: should this rather be part of time_points_generator?
-            # template_inpaint_end = interpolator_template.inpaint_end
-            template_inpaint_end = placeholder_duration
         # TODO: 'It does not make sense to limit the number of tokens that we can resample.')
         if num_max_generated_events is not None:
             num_events = min(
@@ -902,17 +875,6 @@ class DecoderEventsHandler(Handler):
 
         interpolation_time_points = time_points_generator.get_all_eval_points().expand(sampling_config.k_traces, -1)
         ic_int_temp = interpolator_template(interpolation_time_points)[0]
-        temp = ICRes(
-            tok = original_sequence[0],
-            ic_tok = ic_tok_template,
-            entr_tok = entr_tok_template,
-            timepoints = timepoints_tok_template,
-            ic_int = ic_int_temp,
-            timepoints_int = interpolation_time_points[0],
-            decoding_end=template_decoding_end,
-            piece = piece,
-            inpaint_end = template_inpaint_end
-        )
         ic_tok_gen = ics[best_index,decoding_start_event:decoding_end].cpu()
         entr_gen = entrs[best_index,decoding_start_event:decoding_end].cpu()
         ic_int_gen = interpolator(interpolation_time_points)[best_index_all]
@@ -933,7 +895,7 @@ class DecoderEventsHandler(Handler):
             ic_dev = ic_curve_dev([ic_int_gen], [ic_int_temp])[0],
             inpaint_end  = inpaint_end_gen,
         )
-        return temp, gen
+        return gen
     @staticmethod
     def integration(a : float, b : float, unique_timepoint : torch.Tensor, cum_ics: torch.Tensor): 
             assert cum_ics.dim() == 2

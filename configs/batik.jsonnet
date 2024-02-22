@@ -3,11 +3,13 @@
   local ic_curve_fn = import 'ic_curves.jsonnet',
   local channel_weight_mod = import 'weights.jsonnet',
  
-  local pieces = pieces_fn(['kv331_1']),
+  // local pieces = pieces_fn(['kv331_1']),
+  local pieces = pieces_fn(),
   local use_channels = ['pitch', 'time_shift'],
   local channel_weight = channel_weight_mod.get_weights('normalized_weights', use_channels),
   local ic_curve = ic_curve_fn('rampup2', channel_weight_mod.channel_idxs(use_channels)),
   app: [
+    local BaseConfig = 
     {
       local k_traces = 128,
       sampling_config: {
@@ -51,6 +53,7 @@
         match_metric: 'ic',
         onset_on_next_note: true,
       },
-    },
+    };
+    BaseConfig + {experiment+: {ic_curve+: {init_args: ic_curve_fn(curve, channel_weight_mod.channel_idxs(use_channels))}}} for curve in ['square2', 'rampdown2', 'rampup2']
   ],
 }

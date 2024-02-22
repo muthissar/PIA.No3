@@ -13,7 +13,7 @@ from CIA.getters import get_handler, get_data_processor, \
     get_sos_embedding
 import time
 import importlib
-from CIA.ic import DrawnICCurve, ICRes, Interpolator
+from CIA.ic import DrawnICCurve, FixedStepTimepoints, ICRes, Interpolator
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
 from CIA.utils import get_free_port
@@ -41,7 +41,10 @@ def gen(c : Config, device='cpu'):
     for original_x, piece_name, n_inpaint, end_window, piece in tqdm.tqdm(c.experiment.dataset, desc='Pieces completed', disable=rank != 0, position=0, leave=True):
         piece_folder = c.out.joinpath(piece_name)
         piece_folder.mkdir(exist_ok=True, parents=True)
-        
+        template_folder = piece_folder.joinpath('temp')
+        template_folder.mkdir(exist_ok=True, parents=True)
+        match_folder = piece_folder.joinpath('match')
+        match_folder.mkdir(exist_ok=True, parents=True)
         if isinstance(n_inpaint, float):
             rest = original_x[
                 :, data_processor.num_events_before : 
@@ -60,6 +63,13 @@ def gen(c : Config, device='cpu'):
             n_inpaint_ = n_inpaint
 
         x, metadata_dict = data_processor.preprocess(original_x, num_events_middle=n_inpaint_)
+        if end_window == 0.0:
+            x[:,data_processor.num_events_before+1:data_processor.num_events_before+data_processor.num_events_after +1] = data_processor.pad_tokens.data
+            metadata_dict['original_sequence']
+            # original_x[
+            #     :, data_processor.num_events_before + n_inpaint_ : 
+            # ]
+            # data_processor.num_events_after
         placeholder_duration = metadata_dict['placeholder_duration'].item()
             
 
@@ -94,52 +104,89 @@ def gen(c : Config, device='cpu'):
             ic_tok_match_curve = None
             entr_tok_match_curve = None
             match_curve_inpaint_end = placeholder_duration
+        if c.samples_per_template > 0:
+            for i in tqdm.tqdm(np.arange(rank, c.samples_per_template, world_size), desc='sample pr piece', disable=rank != 0, position=1, leave=False):
+                gen_folder = piece_folder.joinpath(f'{i}')
+                gen_folder.mkdir(exist_ok=True, parents=True)
+                gen_file = gen_folder.joinpath(f'ic.pt')
+                if gen_file.exists():
+                    continue
+                # NOTE: might not be necessary to clone/copy
+                x = x.clone()
+                metadata_dict = copy.deepcopy(metadata_dict)
+                # ts = c.experiment.time_points_generator(x, metadata_dict)
+                # TODO: jsonargparse hack since placeholder_duration is not available at initialization time.
+                c.experiment.time_points_generator.initialize(placeholder_duration)
+
+                # TODO: ugly to check like this. Alternatively we could require that
+                # the times are always relative. However, would be problematic for matching,
+                # since the absolute time differences are important for the scaling.
+                if isinstance(c.experiment.ic_curve, DrawnICCurve):
+                    ic_curve : DrawnICCurve = c.experiment.ic_curve
+                    ic_curve.set_placeholder_length(placeholder_duration)
+                original_sequence = x.detach().cpu().clone()
+                gen = decoder_handler.inpaint_ic_curve(
+                    x=x.clone(),
+                    sampling_config=c.sampling_config,
+                    experiment=c.experiment,
+                    metadata_dict=metadata_dict,
+                    piece=piece,
+                    num_max_generated_events=None,
+                    interpolator_template=ic_match_curve,
+                )
+                interpolation_time_points = gen.timepoints_int
+                ic_int_match = ic_match_curve(interpolation_time_points[None])[0]
+                ic_int_temp = interpolation_template(interpolation_time_points[None])[0]
+                
+                match = ICRes(
+                    tok = original_sequence[0],
+                    ic_tok = ic_tok_match_curve,
+                    entr_tok = entr_tok_match_curve,
+                    timepoints = timepoints_tok_match_curve,
+                    ic_int = ic_int_match,
+                    timepoints_int = interpolation_time_points.clone(),
+                    decoding_end=metadata_dict["decoding_end"].item(),
+                    piece = piece,
+                    inpaint_end = match_curve_inpaint_end
+                )
+
+                temp = ICRes(
+                    tok = original_sequence[0],
+                    ic_tok = ic_tok_template,
+                    entr_tok = entr_tok_template,
+                    timepoints = timepoints_tok_template,
+                    ic_int = ic_int_temp,
+                    timepoints_int = interpolation_time_points.clone(),
+                    decoding_end=metadata_dict["decoding_end"].item(),
+                    piece = piece,
+                    inpaint_end = template_inpaint_end
+                )
+
+                before, after = post_process_temp(
+                    dataloader_generator, 
+                    data_processor,
+                    template_folder,
+                    temp,
+                    write_template= i == 0 and rank == 0
+                )
+                before, after = post_process_temp(
+                    dataloader_generator, 
+                    data_processor,
+                    match_folder,
+                    match,
+                    write_template= i == 0 and rank == 0
+                )
+                decoding_start = data_processor.num_events_after+data_processor.num_events_before+2
         
-        for i in tqdm.tqdm(np.arange(rank, c.samples_per_template, world_size), desc='sample pr piece', disable=rank != 0, position=1, leave=False):
-            gen_folder = piece_folder.joinpath(f'{i}')
-            gen_folder.mkdir(exist_ok=True, parents=True)
-            gen_file = gen_folder.joinpath(f'ic.pt')
-            if gen_file.exists():
-                continue
-            # NOTE: might not be necessary to clone/copy
-            x = x.clone()
-            metadata_dict = copy.deepcopy(metadata_dict)
-            # ts = c.experiment.time_points_generator(x, metadata_dict)
-            # TODO: jsonargparse hack since placeholder_duration is not available at initialization time.
-            c.experiment.time_points_generator.initialize(placeholder_duration)
-
-            # TODO: ugly to check like this. Alternatively we could require that
-            # the times are always relative. However, would be problematic for matching,
-            # since the absolute time differences are important for the scaling.
-            if isinstance(c.experiment.ic_curve, DrawnICCurve):
-                ic_curve : DrawnICCurve = c.experiment.ic_curve
-                ic_curve.set_placeholder_length(placeholder_duration)
+                post_process_gen(dataloader_generator, before, after, gen_folder, gen, decoding_start)
+        else:
             original_sequence = x.detach().cpu().clone()
-            gen = decoder_handler.inpaint_ic_curve(
-                x=x.clone(),
-                sampling_config=c.sampling_config,
-                experiment=c.experiment,
-                metadata_dict=metadata_dict,
-                piece=piece,
-                num_max_generated_events=None,
-                interpolator_template=ic_match_curve,
-            )
-            interpolation_time_points = gen.timepoints_int
-            ic_int_match = ic_match_curve(interpolation_time_points[None])[0]
+            if not isinstance(c.experiment.time_points_generator, FixedStepTimepoints):
+                raise NotImplementedError("Only FixedStepTimepoints is supported for now")
+            # TODO: hacky to get the samples like this...
+            c.experiment.time_points_generator.initialize(placeholder_duration)
+            interpolation_time_points = c.experiment.time_points_generator.get_all_eval_points()[0]
             ic_int_temp = interpolation_template(interpolation_time_points[None])[0]
-            
-            match = ICRes(
-                tok = original_sequence[0],
-                ic_tok = ic_tok_match_curve,
-                entr_tok = entr_tok_match_curve,
-                timepoints = timepoints_tok_match_curve,
-                ic_int = ic_int_match,
-                timepoints_int = interpolation_time_points.clone(),
-                decoding_end=metadata_dict["decoding_end"].item(),
-                piece = piece,
-                inpaint_end = match_curve_inpaint_end
-            )
-
             temp = ICRes(
                 tok = original_sequence[0],
                 ic_tok = ic_tok_template,
@@ -151,30 +198,13 @@ def gen(c : Config, device='cpu'):
                 piece = piece,
                 inpaint_end = template_inpaint_end
             )
-
-            
-            template_folder = piece_folder.joinpath('temp')
-            template_folder.mkdir(exist_ok=True, parents=True)
-            match_folder = piece_folder.joinpath('match')
-            match_folder.mkdir(exist_ok=True, parents=True)
-
             before, after = post_process_temp(
                 dataloader_generator, 
                 data_processor,
                 template_folder,
                 temp,
-                write_template= i == 0 and rank == 0
+                write_template = rank == 0
             )
-            before, after = post_process_temp(
-                dataloader_generator, 
-                data_processor,
-                match_folder,
-                match,
-                write_template= i == 0 and rank == 0
-            )
-            decoding_start = data_processor.num_events_after+data_processor.num_events_before+2
-    
-            post_process_gen(dataloader_generator, before, after, gen_folder, gen, decoding_start)
     del decoder_handler
     decoder_handler = None
     torch.cuda.empty_cache()
@@ -331,7 +361,8 @@ def load_pia(device, skip_model=False):
 
 if __name__ == "__main__":
     parser = ArgumentParser(
-        parser_mode="omegaconf"
+        # parser_mode="omegaconf"
+        parser_mode="jsonnet",
         # default_config_files=['configs/config.yaml']
     )
     # parser.add_argument("--app", type=Config, nargs='*')  

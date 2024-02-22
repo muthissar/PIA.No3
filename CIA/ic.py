@@ -385,8 +385,8 @@ class DataCache(Data):
             assert self.n_inpaint < 512 - 5
         elif not isinstance(self.n_inpaint, float):
             raise NotImplementedError
-        if self.end_window is not None:
-            raise NotImplementedError
+        # if self.end_window is not None:
+        #     raise NotImplementedError
         os.environ['PIA_MIDI_PATH'] = self.midi_path
         os.environ['PIA_CACHE_PATH'] = self.cache_path
     @Data.dataloader_generator.setter

@@ -121,10 +121,11 @@ def plot(c : Config, sr : int = 25):
                 if results[0].ic_tok is not None:
                     entrs_max = max([r.entr_tok.max() for r in results])
                     cum_metric_max = max([r.ic_tok.max() for r in results])
-                    fig_plotly.update_yaxes(range=(0, entrs_max+1), row=entr_fig_row, col=1)
-                    fig_plotly.update_yaxes(range=(0, cum_metric_max+1), row=metric_fig_row, col=1)
-                fig_plotly.update_yaxes(range=(0, metric_int_max+1), row=int_fig_row, col=1)
-                fig_plotly.update_yaxes(range=(0, metric_int_summed_max+1), row=int_summed_fig_row, col=1)
+                    # fig_plotly.update_yaxes(range=(0, entrs_max+1), row=i*7 + entr_fig_row, col=1)
+                    fig_plotly.update_yaxes(range=(0, 1), row=i*7 + entr_fig_row, col=1)
+                    fig_plotly.update_yaxes(range=(0, cum_metric_max+1), row=i*7 + metric_fig_row, col=1)
+                fig_plotly.update_yaxes(range=(0, metric_int_max+1), row=i*7 + int_fig_row, col=1)
+                fig_plotly.update_yaxes(range=(0, metric_int_summed_max+1), row=i*7 + int_summed_fig_row, col=1)
             fig_height = 2000
             fig_plotly.update_xaxes(tickformat="%M:%S.%3f")
             fig_plotly.update_layout(height=fig_height, xaxis=dict(range=[crop_start_time, crop_end_time]))

@@ -134,15 +134,54 @@ def eval_(configs : List[Config], out_file: str):
         'time' : pd.Series(int_times, dtype=np.float64),
         'ic_dev' : pd.Series(int_ic_devs, dtype=np.float64)
     })
-    warn('For now the time of the note is found by meaning the time of the tokens, this might change in future.')
+    
+    ic_pitch = tok_ic[0]
+    ic_vel = tok_ic[1]
+    ic_dur = tok_ic[2]
+    ic_shift = tok_ic[3]
+    if c.experiment.onset_on_next_note:
+        changes = np.where(np.diff(tok_ids) > 0)[0]
+        tok_times_arr = np.array(tok_times)
+        times_split = np.split(tok_times_arr, changes+1)
+        tok_times_ = []
+        # add extra points id per id
+        for t in times_split:
+            tok_times_.extend(list(t[:,0 ]) + [t[-1,-1]])
+        tok_ids_ = []
+        for t in np.split(tok_ids, changes+1):
+            tok_ids_.extend(np.insert(t, 0, t[0]))
+        ic_pitch_ = []
+        for t in np.split(ic_pitch, changes+1):
+            ic_pitch_.extend(np.insert(t, -1, np.nan))
+        ic_vel_ = []
+        for t in np.split(ic_vel, changes+1):
+            ic_vel_.extend(np.insert(t, -1, np.nan))
+        ic_dur_ = []
+        for t in np.split(ic_dur, changes+1):
+            ic_dur_.extend(np.insert(t, -1, np.nan))
+        ic_shift_ = []
+        for t in np.split(ic_shift, changes+1):
+            ic_shift_.extend(np.insert(t, 0, np.nan))
+        tok_ic_ = [ic_pitch_, ic_vel_, ic_dur_, ic_shift_]
+    else:
+        tok_ids_ = tok_ids
+        tok_times_ = np.mean(tok_times, axis=-1)
+        tok_ic_ = tok_ic
+        ic_pitch_ = ic_pitch
+        ic_vel_ = ic_vel
+        ic_dur_ = ic_dur
+        ic_shift_ = ic_shift
+        
+
+    
     tok_df = pd.DataFrame({
-        'ids': tok_ids,
-        'time' : pd.Series(np.mean(tok_times, axis=-1), dtype=np.float64),
-        'ic_pitch' : pd.Series(tok_ic[0], dtype=np.float64),
-        'ic_vel' : pd.Series(tok_ic[1], dtype=np.float64),
-        'ic_dur' : pd.Series(tok_ic[2], dtype=np.float64),
-        'ic_shift' : pd.Series(tok_ic[3], dtype=np.float64),
-        'ic_mean': pd.Series(np.mean(tok_ic, axis=0), dtype=np.float64)
+        'ids': tok_ids_,
+        'time' : pd.Series(tok_times_, dtype=np.float64),
+        'ic_pitch' : pd.Series(ic_pitch_, dtype=np.float64),
+        'ic_vel' : pd.Series(ic_vel_, dtype=np.float64),
+        'ic_dur' : pd.Series(ic_dur_, dtype=np.float64),
+        'ic_shift' : pd.Series(ic_shift_, dtype=np.float64),
+        'ic_mean': pd.Series(np.nanmean(tok_ic_, axis=0), dtype=np.float64)
     })
 
     piece_df = pd.DataFrame({

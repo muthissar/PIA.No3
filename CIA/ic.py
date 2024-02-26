@@ -319,6 +319,9 @@ class Piece:
                     end_window_time = inpaint_end_time + self.end_window
                     end_window = np.argmin([abs(n.end - end_window_time) for n in  notes_mozart])
                     self.end_window = end_window - end_decoding
+    @property
+    def name(self) -> str:
+        return Path(self.path).stem + f'_start_{self.start_node}_nodes_{self.n_inpaint}' + ('' if self.end_window is None else f'_end_{self.end_window}')
 @dataclass
 class ICRes:
     tok: torch.Tensor
@@ -426,7 +429,7 @@ class DataPiece(Data):
     def __iter__(self):
         ds : PianoMidiDataset = self.dataloader_generator.dataset
         for piece in self.pieces:
-            piece_name = Path(piece.path).stem + f'_start_{piece.start_node}_nodes_{piece.n_inpaint}' + ('' if piece.end_window is None else f'_end_{piece.end_window}')
+            piece_name = piece.name
             # NOTE: parallelize over number of samples per piece
             sequence = ds.process_score(piece.path)
             orig_seq_length = len(sequence['pitch'])

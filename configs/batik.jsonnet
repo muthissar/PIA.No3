@@ -7,7 +7,19 @@
   local pieces = pieces_fn(),
   local use_channels = ['pitch', 'time_shift'],
   local channel_weight = channel_weight_mod.get_weights('normalized_weights', use_channels),
-  local ic_curve = ic_curve_fn('rampup2', channel_weight_mod.channel_idxs(use_channels)),
+  // local ic_curve = ic_curve_fn('rampup2', channel_weight_mod.channel_idxs(use_channels)),
+  local ic_curves = [ic_curve_fn(curve, channel_weight_mod.channel_idxs(use_channels)) for curve in [
+    
+    'square2constant2',
+    'rampup2constantlow2',
+    'rampdown2constantlow2',
+    // 'square2constant',
+    // 'rampdown2constantlow',
+    // 'rampdown2pause',
+    // 'square2',
+    // 'rampdown2',
+    // 'rampup2'
+  ]],
   app: [
     local BaseConfig = 
     {
@@ -48,12 +60,12 @@
         },
         ic_curve: {
           class_path: 'CIA.ic.LinearInterpolation',
-          init_args: ic_curve,
+          // init_args: ic_curve,
         },
         match_metric: 'ic',
         onset_on_next_note: true,
       },
     };
-    BaseConfig + {experiment+: {ic_curve+: {init_args: ic_curve_fn(curve, channel_weight_mod.channel_idxs(use_channels))}}} for curve in ['square2', 'rampdown2', 'rampup2']
+    BaseConfig + {experiment+: {ic_curve+: {init_args: ic_curve}}} for ic_curve in ic_curves
   ],
 }

@@ -1,0 +1,10 @@
+{% extends "main.html" %}
+{% block debug %}
+<form action="/debug" method="post">
+    <input name="piece_name" type="text" value="kv331_1_start_-45_nodes_134_end_0">
+    <input name="chosen" type="number" value="0">
+    <input name="chosen_curve_id" type="number" value="0">
+    <input name="all_sample_ids" type="text" value="[0,0,0]">
+    <input type="submit" value="Submit">
+</form>
+{% endblock %}

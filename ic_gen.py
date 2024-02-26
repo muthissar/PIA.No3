@@ -361,11 +361,8 @@ def load_pia(device, skip_model=False):
 
 if __name__ == "__main__":
     parser = ArgumentParser(
-        # parser_mode="omegaconf"
         parser_mode="jsonnet",
-        # default_config_files=['configs/config.yaml']
     )
-    # parser.add_argument("--app", type=Config, nargs='*')  
     parser.add_argument("--app", type=List[Config])  
     parser.add_argument("--config", action=ActionConfigFile)
     # NOTE: needed for torch.distributed.launch
@@ -378,6 +375,7 @@ if __name__ == "__main__":
     eval_subcomm = ArgumentParser()
     eval_subcomm.add_argument("--out_file", type=str, default='out/results/result.h5')
     subcommands.add_subcommand("eval", eval_subcomm)
+    subcommands.add_subcommand("folders",ArgumentParser())
     args = parser.parse_args()
     init = parser.instantiate_classes(args)
     app : List[Config] = init.app
@@ -427,6 +425,9 @@ if __name__ == "__main__":
             plot(c)
     elif args.subcommand == "eval":
         eval_(app, init.eval.out_file)
+    elif args.subcommand == "folders":
+        for c in app:
+            print(c.out)
     else:
         raise ValueError(f"Unknown subcommand {args.subcommand}")
 

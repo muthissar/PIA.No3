@@ -115,7 +115,10 @@ document.getElementById('choose-form').addEventListener('submit', function(event
       document.getElementById('successAlert').style.display = 'block';
     }
     else {
-      document.getElementById('failAlert').style.display = 'block';
+      fail_alert = document.getElementById('failAlert')
+      fail_alert.style.display = 'block';
+      fail_alert.textContent = data.correct;
+      
     }
   })
   .catch((error) => {

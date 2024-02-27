@@ -1,4 +1,3 @@
-import hashlib
 from typing import Optional
 from CIA.ic import Experiment, SamplingConfig
 
@@ -20,7 +19,7 @@ class Config:
     seed: Optional[int] = None
     def __post_init__(self):
         # TODO: exp uniquely identifies where
-        exp_folder = hashlib.sha256(str(self.experiment).encode('utf-8')).hexdigest()
+        exp_folder = self.experiment.hash_name
         # exp_folder = slugify(str(self.experiment))
         args_str =  f'{exp_folder}/{slugify(str(self.sampling_config))}'
         self.out = Path(f'out/{args_str}')

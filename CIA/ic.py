@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
+import hashlib
 import os
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Tuple, Union
@@ -469,6 +470,9 @@ class Experiment:
     def __post_init__(self):
         assert self.match_metric in ['ic', 'typicality']
         self.metric_clip_ = torch.FloatTensor(self.metric_clip) if self.metric_clip is not None else None
+    @property
+    def hash_name(self)-> str:
+        return hashlib.sha256(str(self).encode('utf-8')).hexdigest()
 
 
 @dataclass

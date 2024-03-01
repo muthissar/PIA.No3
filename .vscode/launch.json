@@ -5,8 +5,36 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python Debugger: Flask",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "flask",
+            "env": {
+                "FLASK_APP": "${workspaceFolder}/html/app.py",
+                "FLASK_DEBUG": "1"
+            },
+            "args": [
+                "run",
+                "--no-debugger",
+                // "--no-reload",
+                "--port=8000",
+            ],
+            // NOTE: jinja debugging is not supported for some reason?
+            // "jinja": true,
+            "jinja": false,
+            "justMyCode": true,
+            
+        },
+        {
+            "name": "Launch Chrome",
+            "request": "launch",
+            "type": "chrome",
+            "url": "http://localhost:8000",
+            "webRoot": "${workspaceFolder}/html"
+        },
+        {
             "name": "combine_configs",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "module": "combine_configs",
             "justMyCode": false,
@@ -18,32 +46,42 @@
         },
         {
             "name": "Python: plot",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "module": "ic_gen",
             "justMyCode": false,
             "args": [
                 "--config",
                 // "configs/fixed_window_10s.yaml",
-                "configs/batik331.yaml",
+                // "configs/batik331_copy_ic_curve.yaml",
+                "configs/batik.jsonnet",
+                // "out/71a5597a6640d2bf7140e4ad1196901e5cf0085ac060e1a7cf337e20a248fb2f/samplingconfig-k-traces-128-temperature-1-0-top-p-0-9-top-k-0/config.yaml",
                 "plot"
             ]
         },
         {
             "name": "Python: eval",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "module": "ic_gen",
             "justMyCode": false,
             "args": [
                 "--config",
-                "configs/fixed_window_10s.yaml",
+                // "configs/fixed_window_10s.yaml",
+                "configs/template_ics.yaml",
                 "eval",
-            ]
+                "--out_file",
+                "out/results/result_ics.h5",
+
+            ],
+            "env": {
+                "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
+                "CUDA_VISIBLE_DEVICES": "3"
+            }
         },
         {
             "name": "Python: Remote Attach",
-            "type": "python",
+            "type": "debugpy",
             "request": "attach",
             "connect": {
                 "host": "127.0.0.1",
@@ -59,16 +97,17 @@
         },
         {
             "name": "Python: ic_gen",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/ic_gen.py",
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
                 "--config",
-                // "configs/batik331.yaml",
+                "configs/batik.jsonnet",
                 // "configs/fixed_window_10s.yaml",
-                "configs/mozart_segment_2.yaml",
+                // "configs/mozart_segment_2.yaml",
+                // "configs/template_ics.yaml",
                 "gen"
             ],
 
@@ -79,7 +118,7 @@
         },
         {
             "name": "Python: Current File",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
@@ -87,7 +126,7 @@
         },
         {
             "name": "train",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "main.py",
             "console": "integratedTerminal",
@@ -103,7 +142,7 @@
         },
         {
             "name": "generate",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "main.py",
             "console": "integratedTerminal",

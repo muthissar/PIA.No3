@@ -1,0 +1,22 @@
+{
+    "Bassoon": ["B-1", "E-5"],
+    "Clarinet": ["C3", "E-8"],
+    "Contrabassoon": ["B-0", "B-3"],
+    "Bass_clarinet": ["C2", "G5"],
+    "Contrabass": ["C1", "C4"],
+    "English_horn": ["E3", "C6"],
+    "Flute": ["C4", "D7"],
+    "Horn": ["B1", "F5"],
+    "Oboe": ["B-3", "A6"],
+    "Piano": ["A0", "C8"],
+    "Piccolo": ["D5", "C8"],
+    "Saxophone": ["B-2", "G6"],
+    "Trombone": ["B-1", "F5"],
+    "Trumpet": ["F#3", "D6"],
+    "Tuba": ["D1", "F4"],
+    "Viola": ["C3", "E6"],
+    "Violin_1": ["G3", "A7"],
+    "Violin_2": ["G3", "A7"],
+    "Violoncello": ["C2", "C6"],
+    "Remove": ["C0", "A8"]
+}

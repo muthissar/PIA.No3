@@ -1,2 +1,0 @@
-ipython[notebook]>=6.0.0
-sphinx>=1.3.1

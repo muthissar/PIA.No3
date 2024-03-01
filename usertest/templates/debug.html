@@ -1,0 +1,21 @@
+{% extends "main.html" %}
+{% block debug %}
+<form class="form-inline" action="/debug" method="post">
+    <div class="form-group">
+        <label for="piece_name">Piece name</label>
+        <input name="piece_name" class="form-text" type="text" value="kv331_1_start_-45_nodes_134_end_0">
+    </div>
+    <div class="form-group">
+        <label for="chosen_curve_id">Chosen Curve Id</label>
+        <input name="chosen_curve_id" class="form-text" type="number" value="0">
+    </div>
+    <div class="form-group">
+        <label for="all_sample_ids">All Sample Ids</label>
+        <input name="all_sample_ids" class="form-text" type="text" value="[0,0,0]">
+    </div>
+    <div class="form-group">
+        <label >Submit</label>
+        <input type="submit" value="Submit" class="btn btn-primary">
+    </div>
+</form>
+{% endblock %}

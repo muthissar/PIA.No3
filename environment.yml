@@ -1,0 +1,37 @@
+name: pia-web
+channels:
+  - conda-forge
+dependencies:
+  - python=3.8
+  - jsonnet
+  - pip
+  - pip:
+    - flask==3.0.2
+    - gunicorn==21.2.0
+    - jsonargparse==4.27.5
+    - numpy==1.24.4
+    - typing-extensions==4.10.0
+    - einops==0.7.0
+      # torch==1.6.0 
+      # torchvision==0.7.0
+      # CPU only
+    - torch==1.6.0+cpu
+    - torchvision==0.7.0+cpu 
+    - pretty_midi==0.2.10
+    - tqdm==4.66.1
+    - music21==5.*
+      # NOTE: this repo is so far private...
+    # - ../../PIA.No3/jazz-music21
+      # TODO: the setup.py of the package is not working (does not install subfolder with  packages=find_packages()). Therefore also commit repo 
+      # DatasetManager@git+https://github.com/SonyCSLParis/DatasetManager
+    # - ../../PIA.No3/DatasetManager
+      # ./DatasetManager/arrangement
+      # --extra-index-urls
+    - scipy==1.5.2
+    - python-slugify==8.0.1
+    - jsonnet==0.20.0
+    - matplotlib==3.3.1
+
+      # jsonnet
+      # gojsonnet==0.20.0
+    - -f https://download.pytorch.org/whl/torch_stable.html

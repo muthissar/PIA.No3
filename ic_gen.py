@@ -1,5 +1,6 @@
 import copy
 from pathlib import Path
+import subprocess
 from typing import List
 import einops
 import torch
@@ -19,7 +20,7 @@ from torch.nn.parallel import DistributedDataParallel
 from CIA.utils import get_free_port
 from CIA.data_processors.data_processor import DataProcessor
 import numpy as np
-from jsonargparse import ActionConfigFile, ArgumentParser
+from jsonargparse import ActionConfigFile, ActionYesNo, ArgumentParser
 import multiprocessing
 from ic.app import Config
 from ic.eval_ import eval_
@@ -369,6 +370,8 @@ if __name__ == "__main__":
     parser.add_argument("--local_rank", type=int, default=None)
     subcommands = parser.add_subcommands()
     gen_subcomm = ArgumentParser()
+    # gen_subcomm.add_argument("--no_plot", type=bool, default=False)
+    gen_subcomm.add_argument("--plot", action=ActionYesNo)
     subcommands.add_subcommand("gen", gen_subcomm)
     plot_subcomm = ArgumentParser()
     subcommands.add_subcommand("plot", plot_subcomm)
@@ -376,6 +379,11 @@ if __name__ == "__main__":
     eval_subcomm.add_argument("--out_file", type=str, default='out/results/result.h5')
     subcommands.add_subcommand("eval", eval_subcomm)
     subcommands.add_subcommand("folders",ArgumentParser())
+    sync_subcomm = ArgumentParser()
+    sync_subcomm.add_argument("--src", type=str, required=True)
+    sync_subcomm.add_argument("--dst", type=str, required=True)
+    sync_subcomm.add_argument("--rsync_opts", type=List[str], default='-avP')
+    subcommands.add_subcommand("sync", sync_subcomm)
     args = parser.parse_args()
     init = parser.instantiate_classes(args)
     app : List[Config] = init.app
@@ -416,7 +424,7 @@ if __name__ == "__main__":
             # NOTE: allow the processes to finish before plotting
             if torch.distributed.is_initialized():
                 torch.distributed.barrier()
-            if 'RANK' not in os.environ or int(os.environ['RANK']) == 0 :    
+            if args.gen.plot and ('RANK' not in os.environ or int(os.environ['RANK'])) == 0 :    
                 plot(c)
 
     elif args.subcommand == "plot":
@@ -428,6 +436,22 @@ if __name__ == "__main__":
     elif args.subcommand == "folders":
         for c in app:
             print(c.out)
+    elif args.subcommand == "sync":
+        # cmd = f'rsync -av --progress {src} {dst}'
+        for c in app:
+            cmd = ["rsync", *args.sync.rsync_opts, args.sync.src+c.out, args.sync.dst]
+            process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+            stdout, stderr = process.communicate()
+
+            # Print the output
+            print(stdout.decode())
+
+            # Print the errors (if any)
+            if stderr:
+                print("Error:")
+                print(stderr.decode())
+        
     else:
         raise ValueError(f"Unknown subcommand {args.subcommand}")
 

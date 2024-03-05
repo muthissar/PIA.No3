@@ -8,11 +8,7 @@ import os
 
 import tqdm
 from CIA.dataloaders.piano_dataloader import PianoDataloaderGenerator
-from CIA.dataset_managers.piano_midi_dataset import PAD_SYMBOL, PianoMidiDataset
-from CIA.getters import get_handler, get_data_processor, \
-    get_dataloader_generator, get_decoder, get_positional_embedding,\
-    get_sos_embedding
-import time
+from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
 import importlib
 from CIA.ic import DrawnICCurve, FixedStepTimepoints, ICRes, Interpolator
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
@@ -24,7 +20,7 @@ from jsonargparse import ActionConfigFile, ActionYesNo, ArgumentParser
 import multiprocessing
 from ic.app import Config
 from ic.eval_ import eval_
-from ic.plot import plot
+
 
 model_dir = 'models/piano_event_performer_2021-10-01_16:03:06'
 # logging.getLogger()
@@ -268,6 +264,10 @@ def post_process_gen(
     res_gen.write(gen_folder.joinpath(f'ic.pt'))
 
 def load_pia(device, skip_model=False):
+
+    from CIA.getters import get_handler, get_data_processor, \
+        get_dataloader_generator, get_decoder, get_positional_embedding,\
+        get_sos_embedding
     config = importlib.import_module('.config_autoreg', f'{model_dir.replace("/", ".")}').config
     for t in ['time_dilation', 'velocity_shift', 'transposition']:
         config['dataloader_generator_kwargs']['transformations'][t] = False
@@ -380,9 +380,9 @@ if __name__ == "__main__":
     subcommands.add_subcommand("eval", eval_subcomm)
     subcommands.add_subcommand("folders",ArgumentParser())
     sync_subcomm = ArgumentParser()
-    sync_subcomm.add_argument("--src", type=str, required=True)
-    sync_subcomm.add_argument("--dst", type=str, required=True)
-    sync_subcomm.add_argument("--rsync_opts", type=List[str], default='-avP')
+    sync_subcomm.add_argument("--src", type=str, default='/share/hel/home/mathias/devel/python3/PIA.No3')
+    sync_subcomm.add_argument("--dst", type=str, default='.')
+    # sync_subcomm.add_argument("--rsync_opts", type=List[str], default='-avP')
     subcommands.add_subcommand("sync", sync_subcomm)
     args = parser.parse_args()
     init = parser.instantiate_classes(args)
@@ -424,10 +424,12 @@ if __name__ == "__main__":
             # NOTE: allow the processes to finish before plotting
             if torch.distributed.is_initialized():
                 torch.distributed.barrier()
-            if args.gen.plot and ('RANK' not in os.environ or int(os.environ['RANK'])) == 0 :    
+            if args.gen.plot and ('RANK' not in os.environ or int(os.environ['RANK'])) == 0 :
+                from ic.plot import plot
                 plot(c)
 
     elif args.subcommand == "plot":
+        from ic.plot import plot
         # dataloader_generator,data_processor,decoder_handler = load_pia(device='cpu', skip_model=True)
         for c in app:
             plot(c)
@@ -439,13 +441,16 @@ if __name__ == "__main__":
     elif args.subcommand == "sync":
         # cmd = f'rsync -av --progress {src} {dst}'
         for c in app:
-            cmd = ["rsync", *args.sync.rsync_opts, args.sync.src+c.out, args.sync.dst]
-            process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # cmd = ["rsync", *args.sync.rsync_opts, args.sync.src+str(c.out), args.sync.dst]
+            cmd = ["rsync", '-avPR', str(Path(args.sync.src))+'/./' +str(c.out), args.sync.dst]
+            print(cmd)
+            # process = subprocess.Popen(cmd, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            process = subprocess.Popen(cmd, shell=False)
 
             stdout, stderr = process.communicate()
 
             # Print the output
-            print(stdout.decode())
+            # print(stdout.decode())
 
             # Print the errors (if any)
             if stderr:

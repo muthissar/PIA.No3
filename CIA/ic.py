@@ -384,7 +384,7 @@ class DataCache(Data):
     n_pieces: Optional[int] = None
     end_window: Optional[Union[int, float]] = None
     def __post_init__(self):
-        assert Path(self.midi_path).is_dir()
+        # assert Path(self.midi_path).is_dir()
         if isinstance(self.n_inpaint, int):
             assert self.n_inpaint < 512 - 5
         elif not isinstance(self.n_inpaint, float):

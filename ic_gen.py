@@ -380,7 +380,7 @@ if __name__ == "__main__":
     subcommands.add_subcommand("eval", eval_subcomm)
     subcommands.add_subcommand("folders",ArgumentParser())
     sync_subcomm = ArgumentParser()
-    sync_subcomm.add_argument("--src", type=str, default='/share/hel/home/mathias/devel/python3/PIA.No3')
+    sync_subcomm.add_argument("--src", type=str, default='rk8.cp.jku.at:/share/hel/home/mathias/devel/python3/PIA.No3/./')
     sync_subcomm.add_argument("--dst", type=str, default='.')
     # sync_subcomm.add_argument("--rsync_opts", type=List[str], default='-avP')
     subcommands.add_subcommand("sync", sync_subcomm)

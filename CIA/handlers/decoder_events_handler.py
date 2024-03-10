@@ -19,9 +19,10 @@ from itertools import islice
 import numpy as np
 from torch.nn.parallel import DistributedDataParallel
 import einops
-# import logging
-import multiprocessing
-logger = multiprocessing.get_logger()
+import logging
+# import multiprocessing
+logger =logging.getLogger()
+# logger = multiprocessing.get_logger()
     
 def app_ent(
         logits : torch.Tensor,

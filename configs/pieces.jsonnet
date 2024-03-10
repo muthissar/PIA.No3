@@ -4,8 +4,8 @@ local pieces_dict = {
   kv331_1: {
     path: batik_dir+'/midi/kv331_1.mid',
     start_node: 54.5,
-    // n_inpaint: 32.3,
-    n_inpaint: 10.00001,
+    n_inpaint: 32.3,
+    // n_inpaint: 10.00001,
     end_window: 0,
   },
   kv332_2: {

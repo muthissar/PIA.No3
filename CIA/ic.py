@@ -287,6 +287,19 @@ class MovingAverage(Weight):
         mov_avg = self.cw*(-self.c_*(time_diffs+e)).exp()
         mov_avg[time_diffs>=self.window_size] = 0
         return mov_avg
+@dataclass
+class Hann(Weight):
+    window_size : float
+    channel_weight: Union[float, List[Union[float, str]]] = 1.
+    def __post_init__(self):
+        if isinstance(self.channel_weight, float):
+            self.channel_weight = [self.channel_weight]
+        self.cw = torch.tensor(self.channel_weight)[None, None, :, None] # bz=1, tok=1, channels
+    def __call__(self, time_diffs : torch.FloatTensor, metric_vals : torch.FloatTensor) -> torch.Tensor:
+        # NOTE: (bz, observations, channels, eval_points)
+        weight = self.cw*(0.5 +.5*np.cos(np.pi*time_diffs/self.window_size)) # /self.window_size
+        weight[time_diffs>=self.window_size] = 0
+        return weight
 
 
 @dataclass

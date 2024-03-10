@@ -5,34 +5,6 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Flask",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "flask",
-            "env": {
-                "FLASK_APP": "${workspaceFolder}/usertest/app.py",
-                "FLASK_DEBUG": "1"
-            },
-            "args": [
-                "run",
-                "--no-debugger",
-                // "--no-reload",
-                "--port=8000",
-            ],
-            // NOTE: jinja debugging is not supported for some reason?
-            // "jinja": true,
-            "jinja": false,
-            "justMyCode": true,
-            
-        },
-        {
-            "name": "Launch Chrome",
-            "request": "launch",
-            "type": "chrome",
-            "url": "http://localhost:8000",
-            "webRoot": "${workspaceFolder}/html"
-        },
-        {
             "name": "combine_configs",
             "type": "debugpy",
             "request": "launch",
@@ -52,11 +24,9 @@
             "justMyCode": false,
             "args": [
                 "--config",
-                // "configs/fixed_window_10s.yaml",
-                // "configs/batik331_copy_ic_curve.yaml",
-                "configs/batik.jsonnet",
-                // "out/71a5597a6640d2bf7140e4ad1196901e5cf0085ac060e1a7cf337e20a248fb2f/samplingconfig-k-traces-128-temperature-1-0-top-p-0-9-top-k-0/config.yaml",
-                "plot"
+                "configs/batik_eval.jsonnet",
+                "plot",
+                // "--recompute"
             ]
         },
         {
@@ -68,10 +38,11 @@
             "args": [
                 "--config",
                 // "configs/fixed_window_10s.yaml",
-                "configs/template_ics.yaml",
+                // "configs/template_ics.yaml",
+                "configs/batik_eval.jsonnet",
                 "eval",
                 "--out_file",
-                "out/results/result_ics.h5",
+                "out/results/param_run.h5",
 
             ],
             "env": {
@@ -105,10 +76,15 @@
             "args": [
                 "--config",
                 "configs/batik.jsonnet",
+                // "'--app[0].sampling_config.k_traces'",
+                // "'1'",
+                // "'--app[0].experiment.time_points_generator.init_args.k_traces'",
+                // "'1'",
                 // "configs/fixed_window_10s.yaml",
                 // "configs/mozart_segment_2.yaml",
                 // "configs/template_ics.yaml",
-                "gen"
+                "gen",
+                "--recompute"
             ],
 
             "env": {

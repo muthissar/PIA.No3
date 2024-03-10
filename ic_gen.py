@@ -14,6 +14,8 @@ from CIA.ic import DrawnICCurve, FixedStepTimepoints, ICRes, Interpolator
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
 from CIA.utils import get_free_port
+
+
 from CIA.data_processors.data_processor import DataProcessor
 import numpy as np
 from jsonargparse import ActionConfigFile, ActionYesNo, ArgumentParser
@@ -26,7 +28,7 @@ model_dir = 'models/piano_event_performer_2021-10-01_16:03:06'
 # logging.getLogger()
 
 
-def gen(c : Config, device='cpu'):
+def gen(c : Config, recompute : bool,  device='cpu'):
     logger = multiprocessing.get_logger()
     # config =  importlib.import_module('CIA.configs.piarceiverStack').config
     # NOTE: override configuration
@@ -106,7 +108,7 @@ def gen(c : Config, device='cpu'):
                 gen_folder = piece_folder.joinpath(f'{i}')
                 gen_folder.mkdir(exist_ok=True, parents=True)
                 gen_file = gen_folder.joinpath(f'ic.pt')
-                if gen_file.exists():
+                if not recompute and gen_file.exists():
                     continue
                 # NOTE: might not be necessary to clone/copy
                 x = x.clone()
@@ -347,18 +349,6 @@ def load_pia(device, skip_model=False):
             decoder_handler.model.module.transformer.fix_projection_matrices_()
         
     return dataloader_generator,data_processor,decoder_handler
-            # except Exception as e:
-            #     logger.error(f"Failed generating sample {piece_name} with expection {e}")
-
-        # x_inpainted = torch.cat([before, generated_region, after, end], axis=1)
-        # x_inpainted = data_processor.postprocess(x_gen, decoding_end, metadata_dict)
-        # x_inpainted_orig = data_processor.postprocess(original_x, decoding_end, metadata_dict)
-        # print(f"Time of generated sequence {dataloader_generator.get_elapsed_time(x_inpainted[0][None])[0,-1]}")
-        # dataloader_generator.write(x_inpainted_orig[0], 'out/orig')
-                # fig_plotly.write_image(sample.parent.joinpath('ic_curve.svg'))
-            # except Exception as e:
-            #     logger = multiprocessing.get_logger()
-            #     logger.error(f"Failed with expection {e}")
 
 if __name__ == "__main__":
     parser = ArgumentParser(
@@ -371,9 +361,11 @@ if __name__ == "__main__":
     subcommands = parser.add_subcommands()
     gen_subcomm = ArgumentParser()
     # gen_subcomm.add_argument("--no_plot", type=bool, default=False)
-    gen_subcomm.add_argument("--plot", action=ActionYesNo)
+    gen_subcomm.add_argument("--plot", action=ActionYesNo, default=False)
+    gen_subcomm.add_argument("--recompute", action=ActionYesNo, default=False)
     subcommands.add_subcommand("gen", gen_subcomm)
     plot_subcomm = ArgumentParser()
+    plot_subcomm.add_argument("--recompute", action=ActionYesNo, default=False)
     subcommands.add_subcommand("plot", plot_subcomm)
     eval_subcomm = ArgumentParser()
     eval_subcomm.add_argument("--out_file", type=str, default='out/results/result.h5')
@@ -420,19 +412,20 @@ if __name__ == "__main__":
                 args_exp.app = [args.app[i]]
                 parser.save(args_exp, dir.joinpath('config.yaml'), overwrite=True)
             print(f'Experiment: {c.experiment}\n Sampling Config: {c.sampling_config}, folder: {c.out}')
-            gen(c, device=device)
+            recompute = args.gen.recompute
+            gen(c, recompute, device=device)
             # NOTE: allow the processes to finish before plotting
             if torch.distributed.is_initialized():
                 torch.distributed.barrier()
             if args.gen.plot and ('RANK' not in os.environ or int(os.environ['RANK'])) == 0 :
                 from ic.plot import plot
-                plot(c)
+                plot(c, recompute)
 
     elif args.subcommand == "plot":
         from ic.plot import plot
         # dataloader_generator,data_processor,decoder_handler = load_pia(device='cpu', skip_model=True)
         for c in app:
-            plot(c)
+            plot(c, recompute=args.plot.recompute)
     elif args.subcommand == "eval":
         eval_(app, init.eval.out_file)
     elif args.subcommand == "folders":

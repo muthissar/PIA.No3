@@ -14,16 +14,16 @@ from plotly.subplots import make_subplots
 from warnings import warn
 
 
-def express_to_suplot(fig_plotly, explot, row, col):
-    for trace in explot.data:
+def express_to_suplot(fig_plotly, express_plot, row, col):
+    for trace in express_plot.data:
         trace.showlegend = False
         fig_plotly.add_trace(trace, row=row, col=col)
     # explot.set_layout(fig_plotly.layout)
-    explot.add_shape()
+    express_plot.add_shape()
     # for shape
 
 
-def plot(c : Config, sr : int = 25):
+def plot(c : Config, recompute: bool = False, sr : int = 25):
     # TODO: this is not pretty
     crop_start_time = 0
     crop_end_time = 150
@@ -42,7 +42,7 @@ def plot(c : Config, sr : int = 25):
         temp_midi = temp_file.parent.joinpath(f'song.mid')
         
         for sample in song_dir.rglob('*/ic.pt'):
-            if sample == match_curve_file or sample == temp_file:
+            if sample == match_curve_file or sample == temp_file or (sample.exists() and not recompute):
                 continue
             plots_dir = sample.parent.joinpath('plotly_figs')
             plots_dir.mkdir(exist_ok=True, parents=True)

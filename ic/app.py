@@ -30,4 +30,4 @@ class Config:
         log_file = self.out.joinpath('log.txt')
         # TODO: this is problematic, since we need to have one per experiment and since apparantly with 
         # the multiproc we do cannot ask for a nemed one?
-        logging.basicConfig(filename=log_file, level=numeric_level)
+        logging.basicConfig(filename=log_file, filemode='a', level=numeric_level)

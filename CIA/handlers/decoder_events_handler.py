@@ -20,8 +20,8 @@ import numpy as np
 from torch.nn.parallel import DistributedDataParallel
 import einops
 import logging
-logger = logging.getLogger()
 # import multiprocessing
+logger =logging.getLogger()
 # logger = multiprocessing.get_logger()
     
 def app_ent(

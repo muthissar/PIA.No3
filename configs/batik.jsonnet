@@ -6,10 +6,11 @@
   // local pieces = pieces_fn(['kv331_1']),
   local pieces = pieces_fn(),
   local use_channels = ['pitch', 'time_shift'],
-  local channel_weight = channel_weight_mod.get_weights('normalized_weights', use_channels),
+  // local channel_weight = channel_weight_mod.get_weights('normalized_weights', use_channels),
+  local weight = channel_weight_mod.mv_avg(1, 0, 'normalized_weights', use_channels),
+  // local weight = channel_weight_mod.hann(2.0, 'normalized_weights', use_channels),
   // local ic_curve = ic_curve_fn('rampup2', channel_weight_mod.channel_idxs(use_channels)),
   local ic_curves = [ic_curve_fn(curve, channel_weight_mod.channel_idxs(use_channels)) for curve in [
-    
     'square2constant2',
     'rampup2constantlow2',
     'rampdown2constantlow2',
@@ -20,12 +21,12 @@
     'square2constant2shifted',
     'rampup2constantlow2shifted',
     'rampdown2constantlow2shifted',
-    // 'square2constant',
-    // 'rampdown2constantlow',
-    // 'rampdown2pause',
-    // 'square2',
-    // 'rampdown2',
-    // 'rampup2'
+    'square2constant',
+    'rampdown2constantlow',
+    'rampdown2pause',
+    'square2',
+    'rampdown2',
+    'rampup2'
   ]],
   app: [
     local BaseConfig = 
@@ -49,14 +50,17 @@
             tol_placeholder_duration: 0.2,
           },
         },
-        weight: {
-          class_path: 'CIA.ic.MovingAverage',
-          init_args: {
-            window_size: 1,
-            decay: 0,
-            channel_weight: channel_weight,
-          },
-        },
+        weight: weight,
+        // {
+        //   class_path: 'CIA.ic.MovingAverage',
+        //   init_args: {
+        //     window_size: 1,
+        //     decay: 0,
+        //     // window_size: 4.0,
+        //     // decay:  2.3104,
+        //     channel_weight: channel_weight,
+        //   },
+        // },
         dataset: {
           class_path: 'CIA.ic.DataPiece',
           init_args: {

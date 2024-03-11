@@ -18,7 +18,7 @@ from CIA.utils import get_free_port
 
 from CIA.data_processors.data_processor import DataProcessor
 import numpy as np
-from jsonargparse import ActionConfigFile, ActionYesNo, ArgumentParser
+from jsonargparse import ActionConfigFile, ActionJsonnet, ActionYesNo, ArgumentParser
 import multiprocessing
 from ic.app import Config
 from ic.eval_ import eval_
@@ -356,6 +356,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--app", type=List[Config])  
     parser.add_argument("--config", action=ActionConfigFile)
+    # parser.add_argument("--config_vars", type=dict)
+    # parser.add_argument("--config", action=ActionJsonnet(ext_vars="config_vars"))
     # NOTE: needed for torch.distributed.launch
     parser.add_argument("--local_rank", type=int, default=None)
     subcommands = parser.add_subcommands()

@@ -66,7 +66,7 @@
           init_args: {
             label: 'batik',
             pieces: pieces,
-            cache_path: '/share/hel/home/mathias/.cache/mutdata/pia/dataset_cache/BatikPlaysMozart',
+            cache_path: std.extVar('CACHE_DIR')+'/dataset_cache/BatikPlaysMozart',
           },
         },
         ic_curve: {

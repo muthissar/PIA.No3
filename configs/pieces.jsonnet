@@ -1,7 +1,7 @@
 local pieces_dict = {
-  local batik_dir = '/home/mathias/Downloads/batik_plays_mozart',
+  // local batik_dir = '/home/mathias/Downloads/batik_plays_mozart',
   // local batik_dir = '/share/hel/home/mathias/datasets/batik_plays_mozart/',
-  // local batik_dir = std.extVar('BATIK_DIR'),
+  local batik_dir = std.extVar('BATIK_DIR'),
   kv331_1: {
     path: batik_dir+'/midi/kv331_1.mid',
     start_node: 54.5,

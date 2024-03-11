@@ -355,9 +355,9 @@ if __name__ == "__main__":
         parser_mode="jsonnet",
     )
     parser.add_argument("--app", type=List[Config])  
-    parser.add_argument("--config", action=ActionConfigFile)
-    # parser.add_argument("--config_vars", type=dict)
-    # parser.add_argument("--config", action=ActionJsonnet(ext_vars="config_vars"))
+    # parser.add_argument("--config", action=ActionConfigFile)
+    parser.add_argument("--config_vars", type=dict)
+    parser.add_argument("--config", action=ActionJsonnet(ext_vars="config_vars"))
     # NOTE: needed for torch.distributed.launch
     parser.add_argument("--local_rank", type=int, default=None)
     subcommands = parser.add_subcommands()
@@ -379,7 +379,10 @@ if __name__ == "__main__":
     # sync_subcomm.add_argument("--rsync_opts", type=List[str], default='-avP')
     subcommands.add_subcommand("sync", sync_subcomm)
     args = parser.parse_args()
-    init = parser.instantiate_classes(args)
+    init = parser.instantiate_classes(args['config'])
+    
+    # init.app = init.pop('config')
+    # init_2 = parser.instantiate_classes(init)
     app : List[Config] = init.app
     if args.subcommand == 'gen':
         if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:

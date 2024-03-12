@@ -379,7 +379,7 @@ if __name__ == "__main__":
     # sync_subcomm.add_argument("--rsync_opts", type=List[str], default='-avP')
     subcommands.add_subcommand("sync", sync_subcomm)
     args = parser.parse_args()
-    init = parser.instantiate_classes(args['config'])
+    init = parser.instantiate_classes(args.config)
     
     # init.app = init.pop('config')
     # init_2 = parser.instantiate_classes(init)
@@ -414,7 +414,9 @@ if __name__ == "__main__":
                 dir = Path(c.out)
                 dir.mkdir(exist_ok=True, parents=True)
                 args_exp = copy.copy(args)
-                args_exp.app = [args.app[i]]
+                # args_exp.app = [args.config.app[i]]
+                args_exp["app"] = [args.config["app"][i]]
+                del args_exp.config
                 parser.save(args_exp, dir.joinpath('config.yaml'), overwrite=True)
             print(f'Experiment: {c.experiment}\n Sampling Config: {c.sampling_config}, folder: {c.out}')
             recompute = args.gen.recompute

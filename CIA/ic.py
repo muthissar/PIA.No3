@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from datetime import datetime
 import hashlib
 import os
@@ -307,32 +307,39 @@ class Piece:
     path: str
     start_node: Union[int, float, str]
     n_inpaint: Union[int, float, str]
-    end_window: Optional[Union[int, float, str]] = None
-
-    def __post_init__(self):
+    end_window: InitVar[Optional[Union[int, float, str]]] = None
+    _end_window: Optional[Union[int, float, str]] = field(init=False, repr=False)
+    def __post_init__(self, end_window):
         bot = datetime(1900,1,1)
         if isinstance(self.start_node, str):
             self.start_node = (datetime.strptime(self.start_node, '%M:%S.%f') - bot).total_seconds()
         if isinstance(self.n_inpaint, str):
             self.n_inpaint = (datetime.strptime(self.n_inpaint, '%M:%S.%f') - bot).total_seconds()
-        if isinstance(self.end_window, str):
-            self.end_window = (datetime.strptime(self.end_window, '%M:%S.%f') - bot).total_seconds()
+        self._end_window = end_window
+    # NOTE: lazy evaluation of end_window
+    @property
+    def end_window(self) -> int:
+        bot = datetime(1900,1,1)
+        if isinstance(self._end_window, str):
+            self._end_window = (datetime.strptime(self._end_window, '%M:%S.%f') - bot).total_seconds()
         if isinstance(self.start_node, float) and isinstance(self.n_inpaint, float):
-                midi = PrettyMIDI(self.path)
-                notes_mozart = midi.instruments[0].notes
-                sorted(notes_mozart, key=lambda n: n.start)
-                start_time = self.start_node
-                inpaint_end_time = start_time + self.n_inpaint
-                start_decoding = np.argmin([abs(n.end - start_time) for n in  notes_mozart])
-                end_decoding = np.argmin([abs(n.end - inpaint_end_time) for n in  notes_mozart])
-                warn('hard coded n_begin_notes')
-                n_begin_notes = 256
-                self.start_node = start_decoding - n_begin_notes
-                self.n_inpaint = end_decoding - start_decoding
-                if self.end_window is not None:
-                    end_window_time = inpaint_end_time + self.end_window
-                    end_window = np.argmin([abs(n.end - end_window_time) for n in  notes_mozart])
-                    self.end_window = end_window - end_decoding
+            midi = PrettyMIDI(self.path)
+            notes_mozart = midi.instruments[0].notes
+            sorted(notes_mozart, key=lambda n: n.start)
+            start_time = self.start_node
+            inpaint_end_time = start_time + self.n_inpaint
+            start_decoding = np.argmin([abs(n.end - start_time) for n in  notes_mozart])
+            end_decoding = np.argmin([abs(n.end - inpaint_end_time) for n in  notes_mozart])
+            warn('hard coded n_begin_notes')
+            n_begin_notes = 256
+            self.start_node = start_decoding - n_begin_notes
+            self.n_inpaint = end_decoding - start_decoding
+            if self._end_window is not None:
+                end_window_time = inpaint_end_time + self._end_window
+                end_window = np.argmin([abs(n.end - end_window_time) for n in  notes_mozart])
+                self._end_window = end_window - end_decoding
+        return self._end_window
+
     @property
     def name(self) -> str:
         return Path(self.path).stem + f'_start_{self.start_node}_nodes_{self.n_inpaint}' + ('' if self.end_window is None else f'_end_{self.end_window}')

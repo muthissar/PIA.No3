@@ -1,7 +1,7 @@
 {
   local pieces_fn = import 'pieces.jsonnet',
   local channel_weight_mod = import 'weights.jsonnet',
-  local use_channels_arr = [['pitch', 'time_shift'], ['pitch'], ['time_shift']],
+  local use_channels_arr = [['pitch'], ['time_shift'],['pitch', 'time_shift']],
   local BaseConfig = import 'base_config.jsonnet',
   app:
     [BaseConfig(16) +

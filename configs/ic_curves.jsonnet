@@ -21,6 +21,28 @@ local ic_curves = {
         [12.5, 12.5, 12.5, 12.5],
       ],
     },
+  square:
+    {
+      relative_time: true,
+      timepoints: [0, 0.499, 0.5, 1],
+      ics: [
+        [10, 10, 10, 10],
+        [10, 10, 10, 10],
+        [1.5, 1.5, 1.5, 1.5],
+        [1.5, 1.5, 1.5, 1.5],
+      ],
+    },
+  squareoffset:
+    {
+      relative_time: true,
+      timepoints: [0, 0.499, 0.5, 1],
+      ics: [
+        [1.5, 1.5, 1.5, 1.5],
+        [1.5, 1.5, 1.5, 1.5],
+        [10, 10, 10, 10],
+        [10, 10, 10, 10],
+      ],
+    },
   square2:
     {
       relative_time: true,

@@ -11,18 +11,27 @@
   local weight = channel_weight_mod.hann(2.0, 'normalized_weights', use_channels),
   // local ic_curve = ic_curve_fn('rampup2', channel_weight_mod.channel_idxs(use_channels)),
   local k_traces = 128,
-  local ic_curves = [ic_curve_fn(curve, channel_weight_mod.channel_idxs(use_channels)) for curve in [
-    'square2constant2',
-    'rampup2constantlow2',
-    'rampdown2constantlow2',
+  // local curves = [
+  //   'square2constant2',
+  //   'rampup2constantlow2',
+  //   'rampdown2constantlow2',
+  //   'constantlow',
+  //   'constanthigh',
+  //   'rampup2',
+  //   'rampdown2',
+  //   'square2constant2shifted',
+  //   'rampup2constantlow2shifted',
+  //   'rampdown2constantlow2shifted',
+  // ],
+  local curves = [
     'constantlow',
     'constanthigh',
     'rampup2',
     'rampdown2',
-    'square2constant2shifted',
-    'rampup2constantlow2shifted',
-    'rampdown2constantlow2shifted',
-  ]],
+    'square',
+    'squareoffset'
+  ],
+  local ic_curves = [ic_curve_fn(curve, channel_weight_mod.channel_idxs(use_channels)) for curve in curves],
   app:
     [
       BaseConfig(128) +

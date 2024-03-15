@@ -307,15 +307,17 @@ class Piece:
     path: str
     start_node: Union[int, float, str]
     n_inpaint: Union[int, float, str]
-    end_window: InitVar[Optional[Union[int, float, str]]] = None
+    # end_window: InitVar[Optional[Union[int, float, str]]] = None
+    end_window: Optional[Union[int, float, str]] = None
     _end_window: Optional[Union[int, float, str]] = field(init=False, repr=False)
-    def __post_init__(self, end_window):
+    # def __post_init__(self, end_window):
+    def __post_init__(self):
         bot = datetime(1900,1,1)
         if isinstance(self.start_node, str):
             self.start_node = (datetime.strptime(self.start_node, '%M:%S.%f') - bot).total_seconds()
         if isinstance(self.n_inpaint, str):
             self.n_inpaint = (datetime.strptime(self.n_inpaint, '%M:%S.%f') - bot).total_seconds()
-        self._end_window = end_window
+        # self._end_window = end_window
     # NOTE: lazy evaluation of end_window
     @property
     def end_window(self) -> int:
@@ -339,6 +341,9 @@ class Piece:
                 end_window = np.argmin([abs(n.end - end_window_time) for n in  notes_mozart])
                 self._end_window = end_window - end_decoding
         return self._end_window
+    @end_window.setter
+    def end_window(self, end_window :int):
+        self._end_window = end_window
 
     @property
     def name(self) -> str:

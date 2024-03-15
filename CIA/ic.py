@@ -342,12 +342,14 @@ class Piece:
                 self._end_window = end_window - end_decoding
         return self._end_window
     @end_window.setter
-    def end_window(self, end_window :int):
+    def end_window(self, end_window : Optional[int]):
         self._end_window = end_window
 
     @property
     def name(self) -> str:
-        return Path(self.path).stem + f'_start_{self.start_node}_nodes_{self.n_inpaint}' + ('' if self.end_window is None else f'_end_{self.end_window}')
+        # TODO: hacky solution to making sure that durations have been converted to number of notes.
+        end_window = self.end_window
+        return Path(self.path).stem + f'_start_{self.start_node}_nodes_{self.n_inpaint}' + ('' if end_window is None else f'_end_{self.end_window}')
 @dataclass
 class ICRes:
     tok: torch.Tensor

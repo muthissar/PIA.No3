@@ -6,7 +6,7 @@ from CIA.dataset_managers.piano_midi_dataset import END_SYMBOL, PAD_SYMBOL, STAR
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 # from CIA.ic import gen_interpolate
-from CIA.ic import Experiment, ICCurve, ICRes, Interpolator, Piece, SamplingConfig, SingleNoteTimepoints, numerial_stable_softmax_entr
+from ic.ic import Experiment, ICCurve, ICRes, Interpolator, Piece, SamplingConfig, SingleNoteTimepoints, numerial_stable_softmax_entr
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,
@@ -893,40 +893,7 @@ class DecoderEventsHandler(Handler):
                     break
             return res
     
-    def quant(
-            xs: Union[float, int, Iterable],
-            interpolator : Callable[[float, float], float],
-            end = Optional[float],
-        ):
-        if isinstance(xs, Iterable):
-            ys = torch.tensor(xs)
-        else:
-            assert end
-            if isinstance(xs, float):
-                step_size = xs
-                ys = torch.arange(0, end+(step_size-1e-9), step_size)
-            elif isinstance(xs, int):
-                steps = xs
-                ys = torch.linspace(0, end, steps)
-            else:
-                raise ValueError
-        return ys, torch.stack([interpolator(ys[i], ys[i+1]) for  i in range(len(ys)-1)],axis=0)
 
-    def compute_ic_template(
-        self,
-        x,
-        metadata_dict,
-        # temperature=1.0,
-        # top_p=1.0,
-        # top_k=0,
-        # num_max_generated_events=None,
-        # regenerate_first_ts=False,
-    ):
-        
-
-        unique_timepoint, _,  cum_ics, entr = self.compute_token_ics(x, metadata_dict)
-        integrator = functools.partial(self.integration, unique_timepoint=unique_timepoint, cum_ics=cum_ics)
-        return integrator
         
     def compute_token_ics(
         self,

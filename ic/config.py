@@ -1,5 +1,5 @@
 from typing import Optional
-from CIA.ic import Experiment, SamplingConfig
+from ic.ic import Experiment, SamplingConfig
 
 
 from slugify import slugify

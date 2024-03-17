@@ -1,4 +1,4 @@
-from CIA.ic import ICRes
+from ic.ic import ICRes
 from ic.config import Config
 #  present_df
 

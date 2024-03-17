@@ -1,7 +1,7 @@
 from pathlib import Path
 from bs4 import BeautifulSoup
 import torch
-from CIA.ic import DataPiece, ICRes
+from ic.ic import DataPiece, ICRes
 from ic.config import Config
 import soundfile as sf
 import numpy as np

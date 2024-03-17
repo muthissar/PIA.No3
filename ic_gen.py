@@ -10,7 +10,7 @@ import tqdm
 from CIA.dataloaders.piano_dataloader import PianoDataloaderGenerator
 from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
 import importlib
-from CIA.ic import DrawnICCurve, FixedStepTimepoints, ICRes, Interpolator
+from ic.ic import DrawnICCurve, FixedStepTimepoints, ICRes, Interpolator
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
 from CIA.utils import get_free_port

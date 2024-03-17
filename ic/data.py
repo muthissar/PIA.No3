@@ -8,7 +8,7 @@ import einops
 
 import torch
 import numpy as np
-# NOTE: as these two classes are used only for typing reasons, we could probably get rid of them...
+# TODO: as these two classes are used only for typing reasons, we could probably get rid of them...
 # However, since the  functionality is tighly coupled to using these constructs. It seems, we still need it.
 from CIA.dataloaders.dataloader import DataloaderGenerator
 from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset

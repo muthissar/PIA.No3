@@ -1,6 +1,5 @@
-import functools
 import os
-from typing import Callable, List, Optional, Tuple, Union, Iterable
+from typing import List, Tuple
 from warnings import warn
 from CIA.dataset_managers.piano_midi_dataset import END_SYMBOL, PAD_SYMBOL, START_SYMBOL
 from CIA.handlers.handler import Handler

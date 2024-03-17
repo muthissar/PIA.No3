@@ -72,7 +72,7 @@ def gen(c : Config, recompute : bool,  device='cpu'):
         placeholder_duration = metadata_dict['placeholder_duration'].item()
             
 
-        timepoints_tok_template, template_inpaint_end, ic_tok_template, entr_tok_template = decoder_handler.compute_token_onsets(
+        timepoints_tok_template, template_inpaint_end, ic_tok_template, entr_tok_template = decoder_handler.compute_token_ics(
             x=metadata_dict['original_sequence'],
             metadata_dict=metadata_dict,
             onset_on_next_note = c.experiment.onset_on_next_note
@@ -436,7 +436,23 @@ if __name__ == "__main__":
     elif args.subcommand == "eval":
         eval_(app, init.eval.out_file)
     elif args.subcommand == "folders":
+        import shutil
         for c in app:
+            for p in c.out.glob('*/'):
+                # if p.name == 'kv332_2_start_149_nodes_177_end_0':
+                #     new_path = p.parent.joinpath('kv332_2_start_49_nodes_177_end_0')
+                #     if new_path.exists():
+                #         new_path.rename(str(new_path)+'.bak')
+                #     p.rename(new_path)
+                #     new_path.exists()
+                # if p.name == 'kv331_1_start_54.5_nodes_32.3_end_0':
+                #     new_path = p.parent.joinpath('kv331_1_start_-45_nodes_134_end_0')
+                #     if new_path.exists():
+                #         new_path.rename(str(new_path)+'.bak')
+                #     p.rename(new_path)
+                #     new_path.exists()
+                if p.name in ['kv331_1_start_-45_nodes_134_end_0.bak','kv332_2_start_149_nodes_177_end_0.bak', 'kv331_1_start_-45_nodes_41_end_0', 'kv331_1_start_-45_nodes_21_end_0']:
+                    shutil.rmtree(p)
             print(c.out)
     elif args.subcommand == "sync":
         # cmd = f'rsync -av --progress {src} {dst}'

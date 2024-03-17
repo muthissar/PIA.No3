@@ -924,11 +924,11 @@ class DecoderEventsHandler(Handler):
     ):
         
 
-        unique_timepoint, _,  cum_ics, entr = self.compute_token_onsets(x, metadata_dict)
+        unique_timepoint, _,  cum_ics, entr = self.compute_token_ics(x, metadata_dict)
         integrator = functools.partial(self.integration, unique_timepoint=unique_timepoint, cum_ics=cum_ics)
         return integrator
         
-    def compute_token_onsets(
+    def compute_token_ics(
         self,
         x : torch.Tensor,
         metadata_dict : dict,

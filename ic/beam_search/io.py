@@ -1,6 +1,6 @@
 from typing import Optional
 from typing_extensions import Self
-from ic.ic import Piece
+from ic.data import Piece
 
 
 import torch

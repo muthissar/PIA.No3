@@ -16,7 +16,7 @@
   local config = BaseConfig(16) +
   {
     dataset: {
-      class_path: 'ic.ic.DataCache',
+      class_path: 'ic.data.DataCache',
       init_args: {
         label: 'batik',
         split: 'validation',

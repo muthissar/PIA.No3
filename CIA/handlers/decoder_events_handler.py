@@ -9,7 +9,7 @@ from CIA.dataloaders.dataloader import DataloaderGenerator
 from ic.beam_search.io import ICRes
 from ic.config import Experiment, SamplingConfig
 from ic.curves import ICCurve, Interpolator
-from ic.ic import Piece
+from ic.data import Piece
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,

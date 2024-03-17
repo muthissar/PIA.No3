@@ -38,7 +38,7 @@
         {
           experiment+: {
               dataset: {
-                class_path: 'ic.ic.DataPiece',
+                class_path: 'ic.data.DataPiece',
                 init_args: {
                   label: 'batik',
                   pieces: pieces,

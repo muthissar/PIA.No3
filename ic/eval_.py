@@ -1,5 +1,5 @@
 from CIA.ic import ICRes
-from ic.app import Config
+from ic.config import Config
 #  present_df
 
 

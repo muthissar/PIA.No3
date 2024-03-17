@@ -2,7 +2,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 import torch
 from CIA.ic import DataPiece, ICRes
-from ic.app import Config
+from ic.config import Config
 import soundfile as sf
 import numpy as np
 import plotly.express as px

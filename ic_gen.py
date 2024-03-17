@@ -20,7 +20,7 @@ from CIA.data_processors.data_processor import DataProcessor
 import numpy as np
 from jsonargparse import ActionConfigFile, ActionJsonnet, ActionYesNo, ArgumentParser
 import multiprocessing
-from ic.app import Config
+from ic.config import Config
 from ic.eval_ import eval_
 
 

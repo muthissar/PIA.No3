@@ -7,7 +7,8 @@ from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 # from CIA.ic import gen_interpolate
 from ic.config import Experiment, SamplingConfig
-from ic.ic import ICCurve, ICRes, Interpolator, Piece, SingleNoteTimepoints, numerial_stable_softmax_entr
+from ic.curves import ICCurve, Interpolator
+from ic.ic import ICRes, Piece, SingleNoteTimepoints, numerial_stable_softmax_entr
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,

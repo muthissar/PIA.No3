@@ -47,7 +47,7 @@
               },
               weight: weight,
               ic_curve: {
-                class_path: 'ic.ic.LinearInterpolation',
+                class_path: 'ic.curves.LinearInterpolation',
                 init_args: ic_curve,
               },
             

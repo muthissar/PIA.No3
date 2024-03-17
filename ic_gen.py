@@ -10,7 +10,8 @@ import tqdm
 from CIA.dataloaders.piano_dataloader import PianoDataloaderGenerator
 from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
 import importlib
-from ic.ic import DrawnICCurve, FixedStepTimepoints, ICRes, Interpolator
+from ic.curves import DrawnICCurve, Interpolator
+from ic.ic import FixedStepTimepoints, ICRes
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
 from CIA.utils import get_free_port
@@ -438,21 +439,21 @@ if __name__ == "__main__":
     elif args.subcommand == "folders":
         import shutil
         for c in app:
-            for p in c.out.glob('*/'):
-                # if p.name == 'kv332_2_start_149_nodes_177_end_0':
-                #     new_path = p.parent.joinpath('kv332_2_start_49_nodes_177_end_0')
-                #     if new_path.exists():
-                #         new_path.rename(str(new_path)+'.bak')
-                #     p.rename(new_path)
-                #     new_path.exists()
-                # if p.name == 'kv331_1_start_54.5_nodes_32.3_end_0':
-                #     new_path = p.parent.joinpath('kv331_1_start_-45_nodes_134_end_0')
-                #     if new_path.exists():
-                #         new_path.rename(str(new_path)+'.bak')
-                #     p.rename(new_path)
-                #     new_path.exists()
-                if p.name in ['kv331_1_start_-45_nodes_134_end_0.bak','kv332_2_start_149_nodes_177_end_0.bak', 'kv331_1_start_-45_nodes_41_end_0', 'kv331_1_start_-45_nodes_21_end_0']:
-                    shutil.rmtree(p)
+            # for p in c.out.glob('*/'):
+            #     # if p.name == 'kv332_2_start_149_nodes_177_end_0':
+            #     #     new_path = p.parent.joinpath('kv332_2_start_49_nodes_177_end_0')
+            #     #     if new_path.exists():
+            #     #         new_path.rename(str(new_path)+'.bak')
+            #     #     p.rename(new_path)
+            #     #     new_path.exists()
+            #     # if p.name == 'kv331_1_start_54.5_nodes_32.3_end_0':
+            #     #     new_path = p.parent.joinpath('kv331_1_start_-45_nodes_134_end_0')
+            #     #     if new_path.exists():
+            #     #         new_path.rename(str(new_path)+'.bak')
+            #     #     p.rename(new_path)
+            #     #     new_path.exists()
+            #     if p.name in ['kv331_1_start_-45_nodes_134_end_0.bak','kv332_2_start_149_nodes_177_end_0.bak', 'kv331_1_start_-45_nodes_41_end_0', 'kv331_1_start_-45_nodes_21_end_0']:
+            #         shutil.rmtree(p)
             print(c.out)
     elif args.subcommand == "sync":
         # cmd = f'rsync -av --progress {src} {dst}'

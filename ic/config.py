@@ -12,7 +12,8 @@ from pathlib import Path
 
 import torch
 
-from ic.ic import Data, ICCurve, TimepointsGenerator, Weight
+from ic.curves import ICCurve
+from ic.ic import Data, TimepointsGenerator, Weight
 
 
 @dataclass

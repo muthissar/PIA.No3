@@ -1,7 +1,8 @@
 from pathlib import Path
 from bs4 import BeautifulSoup
 import torch
-from ic.ic import DataPiece, ICRes
+from ic.beam_search.io import ICRes
+from ic.ic import DataPiece
 from ic.config import Config
 import soundfile as sf
 import numpy as np

@@ -11,7 +11,7 @@ from CIA.dataloaders.piano_dataloader import PianoDataloaderGenerator
 from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
 import importlib
 from ic.curves import DrawnICCurve, Interpolator
-from ic.ic import FixedStepTimepoints, ICRes
+from ic.beam_search.io import ICRes
 from CIA.positional_embeddings.positional_embedding import PositionalEmbedding
 from torch.nn.parallel import DistributedDataParallel
 from CIA.utils import get_free_port
@@ -23,6 +23,7 @@ from jsonargparse import ActionConfigFile, ActionJsonnet, ActionYesNo, ArgumentP
 import multiprocessing
 from ic.config import Config
 from ic.eval_ import eval_
+from ic.beam_search.timepoints import FixedStepTimepoints
 
 
 model_dir = 'models/piano_event_performer_2021-10-01_16:03:06'

@@ -1,4 +1,4 @@
-from ic.ic import ICRes
+from ic.beam_search.io import ICRes
 from ic.config import Config
 #  present_df
 

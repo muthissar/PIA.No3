@@ -14,7 +14,8 @@ import torch
 
 from ic.curves import ICCurve
 from ic.curves.weight import Weight
-from ic.ic import Data, TimepointsGenerator
+from ic.ic import Data
+from ic.beam_search.timepoints import TimepointsGenerator
 
 
 @dataclass

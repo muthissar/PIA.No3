@@ -10,7 +10,7 @@ function (k_traces)
   logging: 'DEBUG',
   experiment: {
     time_points_generator: {
-      class_path: 'ic.ic.FixedStepTimepoints',
+      class_path: 'ic.beam_search.timepoints.FixedStepTimepoints',
       init_args: {
         step: 0.5,
         eval_step: 0.1,

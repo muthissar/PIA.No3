@@ -6,9 +6,10 @@ from CIA.dataset_managers.piano_midi_dataset import END_SYMBOL, PAD_SYMBOL, STAR
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 # from CIA.ic import gen_interpolate
+from ic.beam_search.io import ICRes
 from ic.config import Experiment, SamplingConfig
 from ic.curves import ICCurve, Interpolator
-from ic.ic import ICRes, Piece, SingleNoteTimepoints, numerial_stable_softmax_entr
+from ic.ic import Piece
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,
@@ -22,6 +23,9 @@ import numpy as np
 from torch.nn.parallel import DistributedDataParallel
 import einops
 import logging
+
+from ic.beam_search.timepoints import SingleNoteTimepoints
+from ic.util import numerial_stable_softmax_entr
 # import multiprocessing
 logger =logging.getLogger()
 # logger = multiprocessing.get_logger()

@@ -6,7 +6,8 @@ from CIA.dataset_managers.piano_midi_dataset import END_SYMBOL, PAD_SYMBOL, STAR
 from CIA.handlers.handler import Handler
 from CIA.dataloaders.dataloader import DataloaderGenerator
 # from CIA.ic import gen_interpolate
-from ic.ic import Experiment, ICCurve, ICRes, Interpolator, Piece, SamplingConfig, SingleNoteTimepoints, numerial_stable_softmax_entr
+from ic.config import Experiment, SamplingConfig
+from ic.ic import ICCurve, ICRes, Interpolator, Piece, SingleNoteTimepoints, numerial_stable_softmax_entr
 from CIA.utils import (
     all_reduce_scalar,
     is_main_process,

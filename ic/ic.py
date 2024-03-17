@@ -1,6 +1,5 @@
 from dataclasses import InitVar, dataclass, field
 from datetime import datetime
-import hashlib
 import os
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Tuple, Union
@@ -10,8 +9,9 @@ import einops
 
 import torch
 import numpy as np
+# NOTE: as these two classes are used only for typing reasons, we could probably get rid of them...
+# However, since the  functionality is tighly coupled to using these constructs. It seems, we still need it.
 from CIA.dataloaders.dataloader import DataloaderGenerator
-
 from CIA.dataset_managers.piano_midi_dataset import PianoMidiDataset
 from pretty_midi import PrettyMIDI
 @dataclass
@@ -391,6 +391,7 @@ class Data(Iterable[Tuple[torch.LongTensor, str, int, Optional[Piece]]]):
     label: str
     @property
     def dataloader_generator(self) -> DataloaderGenerator:
+    # def dataloader_generator(self):
         return self.dataloader_generator_
     @dataloader_generator.setter
     def dataloader_generator(self, val) -> None:
@@ -456,6 +457,7 @@ class DataPiece(Data):
         return f'DataPiece({self.label})'
     def __iter__(self):
         ds : PianoMidiDataset = self.dataloader_generator.dataset
+        # ds = self.dataloader_generator.dataset
         for piece in self.pieces:
             piece_name = piece.name
             # NOTE: parallelize over number of samples per piece
@@ -482,31 +484,3 @@ class DataPiece(Data):
             original_x = einops.rearrange(x, 'f n -> 1 n f')
             yield original_x, piece_name, piece.n_inpaint, piece.end_window, piece
         # raise StopIteration
-@dataclass
-class Experiment:
-    time_points_generator: TimepointsGenerator
-    weight : Weight
-    dataset : Data
-    ic_curve: Optional[ICCurve]
-    match_metric: str = 'ic'
-    # metric_clip: Optional[torch.FloatTensor] = None
-    metric_clip: Optional[List[float]] = None
-    onset_on_next_note: bool = True
-    reduce_equal_times: str = 'sum'
-    # NOTE: here we should have either the test set, or some named collection of pieces....
-    def __post_init__(self):
-        assert self.match_metric in ['ic', 'typicality']
-        self.metric_clip_ = torch.FloatTensor(self.metric_clip) if self.metric_clip is not None else None
-    @property
-    def hash_name(self)-> str:
-        return hashlib.sha256(str(self).encode('utf-8')).hexdigest()
-
-
-@dataclass
-class SamplingConfig:
-    k_traces: int
-    temperature : float
-    n_poly_notes : Optional[int] = None
-    dynamic_temperature_max_ic: Optional[float ] = None
-    top_p: float = 0.0
-    top_k: int = 0

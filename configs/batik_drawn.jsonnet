@@ -38,7 +38,7 @@
         {
           experiment+: {
               dataset: {
-                class_path: 'CIA.ic.DataPiece',
+                class_path: 'ic.ic.DataPiece',
                 init_args: {
                   label: 'batik',
                   pieces: pieces,
@@ -47,7 +47,7 @@
               },
               weight: weight,
               ic_curve: {
-                class_path: 'CIA.ic.LinearInterpolation',
+                class_path: 'ic.ic.LinearInterpolation',
                 init_args: ic_curve,
               },
             

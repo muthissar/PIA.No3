@@ -8,7 +8,7 @@
      {
        experiment+: {
          dataset: {
-           class_path: 'CIA.ic.DataCache',
+           class_path: 'ic.ic.DataCache',
            init_args: {
              label: 'batik',
              split: 'validation',

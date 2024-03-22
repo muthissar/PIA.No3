@@ -1,5 +1,7 @@
 import copy
+import hashlib
 from pathlib import Path
+import re
 import subprocess
 from typing import List
 import einops
@@ -357,9 +359,9 @@ if __name__ == "__main__":
         parser_mode="jsonnet",
     )
     parser.add_argument("--app", type=List[Config])  
-    # parser.add_argument("--config", action=ActionConfigFile)
-    parser.add_argument("--config_vars", type=dict)
-    parser.add_argument("--config", action=ActionJsonnet(ext_vars="config_vars"))
+    parser.add_argument("--config", action=ActionConfigFile)
+    # parser.add_argument("--config_vars", type=dict)
+    # parser.add_argument("--config", action=ActionJsonnet(ext_vars="config_vars"))
     # NOTE: needed for torch.distributed.launch
     parser.add_argument("--local_rank", type=int, default=None)
     subcommands = parser.add_subcommands()
@@ -374,14 +376,17 @@ if __name__ == "__main__":
     eval_subcomm = ArgumentParser()
     eval_subcomm.add_argument("--out_file", type=str, default='out/results/result.h5')
     subcommands.add_subcommand("eval", eval_subcomm)
-    subcommands.add_subcommand("folders",ArgumentParser())
+    folders_subcommand = ArgumentParser()
+    folders_subcommand.add_argument("--verbose", action=ActionYesNo)
+    subcommands.add_subcommand("folders",folders_subcommand)
     sync_subcomm = ArgumentParser()
     sync_subcomm.add_argument("--src", type=str, default='rk8.cp.jku.at:/share/hel/home/mathias/devel/python3/PIA.No3/./')
     sync_subcomm.add_argument("--dst", type=str, default='.')
     # sync_subcomm.add_argument("--rsync_opts", type=List[str], default='-avP')
     subcommands.add_subcommand("sync", sync_subcomm)
     args = parser.parse_args()
-    init = parser.instantiate_classes(args.config)
+    # init = parser.instantiate_classes(args.config)
+    init = parser.instantiate_classes(args)
     
     # init.app = init.pop('config')
     # init_2 = parser.instantiate_classes(init)
@@ -416,10 +421,11 @@ if __name__ == "__main__":
                 dir = Path(c.out)
                 dir.mkdir(exist_ok=True, parents=True)
                 args_exp = copy.copy(args)
-                # args_exp.app = [args.config.app[i]]
-                args_exp["app"] = [args.config["app"][i]]
-                del args_exp.config
-                parser.save(args_exp, dir.joinpath('config.yaml'), overwrite=True)
+                # # args_exp.app = [args.config.app[i]]
+                # args_exp["app"] = [args.config["app"][i]]
+                # del args_exp.config
+                args_exp.app = [args.app[i]]
+                parser.save(args_exp, dir.joinpath('config.json'), overwrite=True)
             print(f'Experiment: {c.experiment}\n Sampling Config: {c.sampling_config}, folder: {c.out}')
             recompute = args.gen.recompute
             gen(c, recompute, device=device)
@@ -436,6 +442,7 @@ if __name__ == "__main__":
         for c in app:
             plot(c, recompute=args.plot.recompute)
     elif args.subcommand == "eval":
+        # eval_(app, init.eval.out_file)
         eval_(app, init.eval.out_file)
     elif args.subcommand == "folders":
         import shutil
@@ -455,6 +462,24 @@ if __name__ == "__main__":
             #     #     new_path.exists()
             #     if p.name in ['kv331_1_start_-45_nodes_134_end_0.bak','kv332_2_start_149_nodes_177_end_0.bak', 'kv331_1_start_-45_nodes_41_end_0', 'kv331_1_start_-45_nodes_21_end_0']:
             #         shutil.rmtree(p)
+            # new_exp = re.sub(r', n_pieces=\d+','',str(c.experiment))
+            # new_hash = hashlib.sha256(new_exp.encode('utf-8')).hexdigest()
+            # new_parts = list(c.out.parts)
+            # new_parts[1] = new_hash
+            # new_path =  Path(*new_parts)
+            # # shutil.rmtree(new_path,ignore_errors=True)
+            # # continue
+            # new_path.mkdir(exist_ok=True, parents=True)
+            # offset = max([int(str(p.name)) for p in new_path.glob('*') if str(p.name).isnumeric()]+[-1])
+            # for i, p in enumerate([p for p in c.out.glob('*/') if p.is_dir()]):
+            #     new_p = new_path.joinpath(str(offset+1+i))
+            #     if p.is_dir():
+            #         shutil.copytree(p, new_p)
+            #     else:
+            #         Exception(f"{p} is not a directory")
+            #         shutil.copy2(p, new_p)
+            # if args.folders.verbose:
+            #     print(f"Exp: {c}\nhash: {c.out}\n\n")
             print(c.out)
     elif args.subcommand == "sync":
         # cmd = f'rsync -av --progress {src} {dst}'

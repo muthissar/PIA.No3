@@ -31,8 +31,7 @@ class FixedStepTimepoints(TimepointsGenerator):
     k_traces : int = field(repr=False)
     tol_placeholder_duration : float = field(repr=False, default=0.2)
     def __post_init__(self):
-        # super().__post_init__()
-        assert (self.step / self.eval_step).is_integer()
+        assert round(self.step / self.eval_step, 5).is_integer()
     def initialize(self, placholder_duration : float):
         # self.current_step = 0   
         self.current_step = 1
@@ -60,15 +59,25 @@ class FixedStepTimepoints(TimepointsGenerator):
         Returns the (rounded) current number of secs generated and the total number of secs to be generated
         '''
         return round(self.current_step * self.step), round(self.placeholder_duration)
-    def get_eval_points(self):
+    def get_eval_points(self , completed_idx : torch.BoolTensor):
         if self.current_step == 0:
             ts = self.k_traces*[torch.tensor([0.0])]
         else:
             ts = []
-            for next_time_trace in self.next_time_traces:
+            max_time = self.next_time_traces.max()
+            for i, next_time_trace in enumerate(self.next_time_traces):
                 e = 1e-9
                 # NOTE: overshoot next_time_trace - (self.current_step) * self.step
-                ts_ = torch.arange((self.current_step-1) * self.step, next_time_trace-e, self.eval_step)
+                # NOTE: this is 
+                # TODO: inefficient, to check all points, but important, when using sequences that are done.
+                if i in completed_idx:
+                    end_int = max_time
+                    start_int = 0
+                else:
+                    end_int = next_time_trace-e
+                    # start_int = (self.current_step-1) * self.step
+                    start_int = 0
+                ts_ = torch.arange(start_int, end_int, self.eval_step)
                 # if len(ts_) == 0 or ts_[-1] != next_time_trace:
                 #     ts_ = torch.cat([ts_, torch.tensor([next_time_trace])])
                 ts.append(ts_)
@@ -79,62 +88,62 @@ class FixedStepTimepoints(TimepointsGenerator):
     def get_all_eval_points(self):
         return torch.arange(0, self.placeholder_duration, self.eval_step)[None]
 
-
-@dataclass
-class SingleNoteTimepoints(TimepointsGenerator):
-    # def __post_init__(self):
-    #     # assert (self.step / self.eval_step).is_integer()
-    #     self.best_times = [0.0]
-    k_traces : int = field(repr=False)
-    eval_step: float = field(repr=False, default=0.1)
-    tol_placeholder_duration : float = field(repr=False, default=0.2)
-    def initialize(self, placholder_duration : float):
-        # self.current_time = 0.0
-        self.placeholder_duration = placholder_duration
-        # self.past_time_traces =  torch.zeros(self.k_traces)
-        # self.current_time_traces =  torch.zeros(self.k_traces)
-        self.next_time_traces = torch.zeros(self.k_traces)
-        self.best_times = [0.0]
-        warn('This value is hardcoded, and the same in decoder_events_handler.py')
-    def update_is_exceeded(self, t : torch.FloatTensor, idx : int) -> bool:
-        '''
-        Times
-        '''
-        # self.current_time_traces[idx] = self.next_time_traces[idx]
-        # TODO: the ics of shift should be set on the next note...
-        self.next_time_traces[idx] = t
-        return True
-    def done(self) -> bool:
-        return len(self.best_times)>0 and self.best_times[-1] >= self.placeholder_duration - self.tol_placeholder_duration
-    def update_step(self, idx : int) -> None:
-        # self.best_times.append(t.item())
-        # raise NotImplementedError('This does not work if generation[idx] is done... ')
-        self.best_times.append(self.next_time_traces[idx].item())
-        # self.time_traces = []
-    def progress(self) -> Tuple[int, int]:
-        '''
-        Returns the (rounded) current number of secs generated and the total number of secs to be generated
-        '''
-        return round(self.best_times[-1] if len(self.best_times) else 0.), round(self.placeholder_duration)
-    def get_eval_points(self) -> List[torch.FloatTensor]:
-        # if len(self.best_times) == 0:
-        #     ts = torch.zeros(self.k_traces, 1)
-        # else:
-        #     ts = torch.tensor(self.time_traces)[:, None]
-        # ts = self.current_time_traces[:, None]
-        # ts = torch.tensor(self.best_times[-1])[None, None]
-        # NOTE: quite inefficient, because in principle it would be enough to only use 
-        # next_time_traces, because we always expand from the note before. However, for times where the sequence is done, 
-        # we need to evaluate in the extra points. Can  we simply get rid of choosing the done sequences?
-        # ts = torch.cat([torch.tensor(self.best_times)[None].expand(self.k_traces, -1), self.next_time_traces[:, None]], dim=1)
-        # ts = self.next_time_traces[:, None]
-        ts = []
-        for next_time_trace in self.next_time_traces:
-            ts_ = torch.arange(self.best_times[-1], next_time_trace, self.eval_step)
-            if len(ts_) == 0 or ts_[-1] != next_time_trace:
-                ts_ = torch.cat([ts_, torch.tensor([next_time_trace])])
-            ts.append(ts_)
-        return ts
-    def get_all_eval_points(self):
-        # return torch.arange(0, self.placeholder_duration, self.eval_step)
-        return torch.tensor(self.best_times)[None]
+# NOTE: does not work do to not finishing time points
+# @dataclass
+# class SingleNoteTimepoints(TimepointsGenerator):
+#     # def __post_init__(self):
+#     #     # assert (self.step / self.eval_step).is_integer()
+#     #     self.best_times = [0.0]
+#     k_traces : int = field(repr=False)
+#     eval_step: float = field(repr=False, default=0.1)
+#     tol_placeholder_duration : float = field(repr=False, default=0.2)
+#     def initialize(self, placholder_duration : float):
+#         # self.current_time = 0.0
+#         self.placeholder_duration = placholder_duration
+#         # self.past_time_traces =  torch.zeros(self.k_traces)
+#         # self.current_time_traces =  torch.zeros(self.k_traces)
+#         self.next_time_traces = torch.zeros(self.k_traces)
+#         self.best_times = [0.0]
+#         warn('This value is hardcoded, and the same in decoder_events_handler.py')
+#     def update_is_exceeded(self, t : torch.FloatTensor, idx : int) -> bool:
+#         '''
+#         Times
+#         '''
+#         # self.current_time_traces[idx] = self.next_time_traces[idx]
+#         # TODO: the ics of shift should be set on the next note...
+#         self.next_time_traces[idx] = t
+#         return True
+#     def done(self) -> bool:
+#         return len(self.best_times)>0 and self.best_times[-1] >= self.placeholder_duration - self.tol_placeholder_duration
+#     def update_step(self, idx : int) -> None:
+#         # self.best_times.append(t.item())
+#         # raise NotImplementedError('This does not work if generation[idx] is done... ')
+#         self.best_times.append(self.next_time_traces[idx].item())
+#         # self.time_traces = []
+#     def progress(self) -> Tuple[int, int]:
+#         '''
+#         Returns the (rounded) current number of secs generated and the total number of secs to be generated
+#         '''
+#         return round(self.best_times[-1] if len(self.best_times) else 0.), round(self.placeholder_duration)
+#     def get_eval_points(self) -> List[torch.FloatTensor]:
+#         # if len(self.best_times) == 0:
+#         #     ts = torch.zeros(self.k_traces, 1)
+#         # else:
+#         #     ts = torch.tensor(self.time_traces)[:, None]
+#         # ts = self.current_time_traces[:, None]
+#         # ts = torch.tensor(self.best_times[-1])[None, None]
+#         # NOTE: quite inefficient, because in principle it would be enough to only use 
+#         # next_time_traces, because we always expand from the note before. However, for times where the sequence is done, 
+#         # we need to evaluate in the extra points. Can  we simply get rid of choosing the done sequences?
+#         # ts = torch.cat([torch.tensor(self.best_times)[None].expand(self.k_traces, -1), self.next_time_traces[:, None]], dim=1)
+#         # ts = self.next_time_traces[:, None]
+#         ts = []
+#         for next_time_trace in self.next_time_traces:
+#             ts_ = torch.arange(self.best_times[-1], next_time_trace, self.eval_step)
+#             if len(ts_) == 0 or ts_[-1] != next_time_trace:
+#                 ts_ = torch.cat([ts_, torch.tensor([next_time_trace])])
+#             ts.append(ts_)
+#         return ts
+#     def get_all_eval_points(self):
+#         # return torch.arange(0, self.placeholder_duration, self.eval_step)
+#         return torch.tensor(self.best_times)[None]

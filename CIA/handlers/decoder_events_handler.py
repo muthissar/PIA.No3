@@ -23,7 +23,7 @@ from torch.nn.parallel import DistributedDataParallel
 import einops
 import logging
 
-from ic.beam_search.timepoints import SingleNoteTimepoints
+from ic.beam_search.timepoints import FixedStepTimepoints
 from ic.util import numerial_stable_softmax_entr
 # import multiprocessing
 logger =logging.getLogger()
@@ -704,7 +704,7 @@ class DecoderEventsHandler(Handler):
                             if sampling_config.dynamic_temperature_max_ic is not None:
                                 # NOTE: hacky way of achieving next ic.
                                 time_next  = torch.ones((weights.size(0),1))*(time_points_generator.current_step + 1) * time_points_generator.step
-                                ic_next = interpolator_template(time_next)[..., 0, channel_index]
+                                ic_next = torch.stack(interpolator_template(time_next), dim=0)[..., 0, channel_index]
                                 ic_max = sampling_config.dynamic_temperature_max_ic
                                 entr_target = ic_next / ic_max * np.log(weights.size(-1)) 
                                 expected_n_notes_pr_step = 1
@@ -738,6 +738,11 @@ class DecoderEventsHandler(Handler):
                                 filtered_logits[:, pad_idx] = float('-inf')
                                 start_idx = self.dataloader_generator.dataset.value2index['time_shift'][START_SYMBOL]
                                 filtered_logits[:, start_idx] = float('-inf')
+                                end_idx = self.dataloader_generator.dataset.value2index['time_shift'][END_SYMBOL]
+                                # NOTE: disable generating end_symbol as first token, which leads to a bug, when decreasing the length
+                                # might be uncessary since we look from time zero to end of time.
+                                filtered_logits[event_indices[batch_indices] == decoding_start_event, end_idx] = float('-inf')
+                                    
                                 if sampling_config.n_poly_notes is not None:
                                     zeroish_shifts = [0.0, 0.02, 0.04]
                                     zero_shift_idx = torch.tensor([self.dataloader_generator.dataset.value2index['time_shift'][shift] for shift in zeroish_shifts], device=x.device)
@@ -770,11 +775,14 @@ class DecoderEventsHandler(Handler):
                         len_exceeded = event_indices[batch_indices] == x.shape[-2] -1
                         
                         
-
+                        # TODO: bugs occur if we exit on is_last_token. For instance, the drawn IC curve might not be exceeded.
+                        # Should be fixed after after FixedStepTimepoints.get_eval looks from 0, to end of time.
                         stop_outer = is_last_token_end | (len_exceeded)
                         stop_outer_idx = batch_indices[stop_outer].tolist()
-                        if not isinstance(time_points_generator, SingleNoteTimepoints):
+                        if isinstance(time_points_generator, FixedStepTimepoints):
                             completed[stop_outer_idx] = True
+                        else:
+                            raise NotImplementedError
                         # NOTE: avoid end token to be written in the middle tokens
                         # warn('This is very unreadable, and should be refactored')
                         event_indices[batch_indices[is_last_token_end]] -= 1
@@ -822,7 +830,7 @@ class DecoderEventsHandler(Handler):
                     )
                     # NOTE: We pick out the end-points for the current time-step and the next and split that in a smaller resolutions
                     # raise NotImplementedError('Here there\'s likely a bug, since we always return the "previous" timestep')
-                    ts = time_points_generator.get_eval_points()
+                    ts = time_points_generator.get_eval_points(torch.where(completed)[0])
                     # int_time = interpolator(ts).mean(dim=1, keepdims=True)
                     int_time = interpolator(ts)
                     int_time_temp = interpolator_template(ts)

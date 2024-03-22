@@ -26,4 +26,11 @@ class ICRes:
         torch.save(obj=self, f=p)
     @classmethod
     def load(cls, p : Path) -> Self:
-        return torch.load(p)
+        try:
+            return torch.load(p)
+        except ModuleNotFoundError:
+                import sys
+                import ic.beam_search.io as io
+                # TODO: dirty fix for old result files.
+                sys.modules['CIA.ic'] = io
+                return torch.load(p)

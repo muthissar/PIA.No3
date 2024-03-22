@@ -57,10 +57,6 @@ class Config:
     seed: Optional[int] = None
     def __post_init__(self):
         # TODO: exp uniquely identifies where
-        exp_folder = self.experiment.hash_name
-        # exp_folder = slugify(str(self.experiment))
-        args_str =  f'{exp_folder}/{slugify(str(self.sampling_config))}'
-        self.out = Path(f'out/{args_str}')
         self.out.mkdir(parents=True, exist_ok=True)
         numeric_level = getattr(logging, self.logging.upper(), None)
         if not isinstance(numeric_level, int):
@@ -69,3 +65,9 @@ class Config:
         # TODO: this is problematic, since we need to have one per experiment and since apparantly with 
         # the multiproc we do cannot ask for a nemed one?
         logging.basicConfig(filename=log_file, filemode='a', level=numeric_level)
+    @property
+    def out(self) -> Path:
+        exp_folder = self.experiment.hash_name
+        # exp_folder = slugify(str(self.experiment))
+        args_str =  f'{exp_folder}/{slugify(str(self.sampling_config))}'
+        return Path(f'out/{args_str}')

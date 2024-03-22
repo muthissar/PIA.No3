@@ -104,11 +104,13 @@ class DataCache(Data):
     split : str
     midi_path : str = field(repr=False)
     cache_path : str = field(repr=False)
-    n_pieces: Optional[int] = None
+    # n_pieces: Optional[int] = None
+    n_pieces: Optional[int] = field(repr=False, default=None)
     end_window: Optional[Union[int, float]] = None
     def __post_init__(self):
         # assert Path(self.midi_path).is_dir()
         if isinstance(self.n_inpaint, int):
+            # TODO: hard coded.
             assert self.n_inpaint < 512 - 5
         elif not isinstance(self.n_inpaint, float):
             raise NotImplementedError

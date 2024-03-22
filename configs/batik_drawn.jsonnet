@@ -3,6 +3,7 @@
   local ic_curve_fn = import 'ic_curves.jsonnet',
   local channel_weight_mod = import 'weights.jsonnet',
   local BaseConfig = import 'base_config.jsonnet',
+  local env = import 'env.jsonnet',
   // local pieces = pieces_fn(['kv331_1']),
   local pieces = pieces_fn(),
   local use_channels = ['pitch', 'time_shift'],
@@ -42,7 +43,8 @@
                 init_args: {
                   label: 'batik',
                   pieces: pieces,
-                  cache_path: std.extVar('CACHE_DIR')+'/dataset_cache/BatikPlaysMozart',
+                  // cache_path: std.extVar('CACHE_DIR')+'/dataset_cache/BatikPlaysMozart',
+                  cache_path: env.CACHE_DIR+'/dataset_cache/BatikPlaysMozart',
                 },
               },
               weight: weight,
@@ -50,9 +52,21 @@
                 class_path: 'ic.curves.LinearInterpolation',
                 init_args: ic_curve,
               },
+              time_points_generator+: {
+                init_args+: {
+                  step: 0.5,
+                }
+              }
             
           },
           samples_per_template: 8,
-        } for ic_curve in ic_curves
+        } +
+        { 
+          sampling_config+: {
+            dynamic_temperature_max_ic: 50,
+          }
+        }
+      
+      for ic_curve in ic_curves
     ],
 }

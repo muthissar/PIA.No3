@@ -1,3 +1,5 @@
+from dataclasses import asdict
+import json
 from ic.beam_search.io import ICRes
 from ic.config import Config
 #  present_df
@@ -106,10 +108,12 @@ def eval_(configs : List[Config], out_file: str):
                         for ic, feat in zip(gen.ic_tok.numpy().T, tok_ic):
                             feat.extend(ic)
                         tok_ids.extend(len(gen.ic_tok)*[id_])
-                        exps.append(str(c.experiment))
+                        # exps.append(str(c.experiment))
+                        exps.append(json.dumps(asdict(c.experiment)))
                         # exps.append(c.experiment)
                         # TODO: make more general
-                        params.append(str(c.sampling_config))
+                        # params.append(str(c.sampling_config))
+                        params.append(json.dumps(asdict(c.sampling_config)))
                         # params.append(c.sampling_config)
                         pieces.append(piece_dir.name)
                         samples.append(sample.parent.name)

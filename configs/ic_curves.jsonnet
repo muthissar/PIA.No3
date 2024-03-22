@@ -73,7 +73,7 @@ local ic_curves = {
         [2.5, 2.5, 2.5, 2.5],
       ],
     },
-    square2constant2:
+  square2constant2:
     {
       relative_time: true,
       timepoints: [0, 0.249, 0.25, 0.499, 0.5, 0.749, 0.75, 1],
@@ -88,7 +88,7 @@ local ic_curves = {
         [2.5, 2.5, 2.5, 2.5],
       ],
     },
-    square2constant2shifted:
+  square2constant2shifted:
     {
       relative_time: true,
       timepoints: [0, 0.249, 0.25, 0.499, 0.5, 0.749, 0.75, 1],
@@ -103,7 +103,7 @@ local ic_curves = {
         [10, 10, 10, 10],
       ],
     },
-    rampdown2pause:
+  rampdown2pause:
     {
       relative_time: true,
       timepoints: [0, 0.249, 0.25, 0.499, 0.5, 0.749, 0.75, 1],
@@ -118,7 +118,7 @@ local ic_curves = {
         [1.5, 1.5, 1.5, 1.5],
       ],
     },
-    rampdown2constantlow:
+  rampdown2constantlow:
     {
       relative_time: true,
       timepoints: [0, 0.249, 0.25, 0.499, 0.5, 0.749, 0.75, 1],
@@ -133,7 +133,7 @@ local ic_curves = {
         [5, 5, 5, 5],
       ],
     },
-    rampdown2constantlow2:
+  rampdown2constantlow2:
     {
       relative_time: true,
       timepoints: [0, 0.249, 0.25, 0.499, 0.5, 0.749, 0.75, 1],
@@ -148,7 +148,7 @@ local ic_curves = {
         [2.5, 2.5, 2.5, 2.5],
       ],
     },
-    rampdown2constantlow2shifted:
+  rampdown2constantlow2shifted:
     {
       relative_time: true,
       timepoints: [0, 0.249, 0.25, 0.499, 0.5, 0.749, 0.75, 1],
@@ -163,7 +163,7 @@ local ic_curves = {
         [2.5, 2.5, 2.5, 2.5],
       ],
     },
-    rampup2constantlow2:
+  rampup2constantlow2:
     {
       relative_time: true,
       timepoints: [0, 0.249, 0.25, 0.499, 0.5, 0.749, 0.75, 1],
@@ -178,7 +178,7 @@ local ic_curves = {
         [2.5, 2.5, 2.5, 2.5],
       ],
     },
-    rampup2constantlow2shifted:
+  rampup2constantlow2shifted:
     {
       relative_time: true,
       timepoints: [0, 0.249, 0.25, 0.499, 0.5, 0.749, 0.75, 1],
@@ -193,7 +193,7 @@ local ic_curves = {
         [12.5, 12.5, 12.5, 12.5],
       ],
     },
-    constantlow:
+  constantlow:
     {
       relative_time: true,
       timepoints: [0, 1],
@@ -202,7 +202,7 @@ local ic_curves = {
         [2.5, 2.5, 2.5, 2.5],
       ],
     },
-    constanthigh:
+  constanthigh:
     {
       relative_time: true,
       timepoints: [0, 1],
@@ -211,6 +211,11 @@ local ic_curves = {
         [10.0, 10.0, 10.0, 10.0],
       ],
     },
-    
+
 };
-function (curve, channels=[0,1,2,3]) ic_curves[curve] + {ics: [[if std.member(channels, j) then ics[j] else 0.0 for j in std.range(0, 3)] for ics in ic_curves[curve].ics]}
+function(curve, channels=[0, 1, 2, 3]) ic_curves[curve] {
+  ics: [
+    [if std.member(channels, j) then ics[j] else 0.0 for j in std.range(0, 3)]
+    for ics in ic_curves[curve].ics
+  ],
+}

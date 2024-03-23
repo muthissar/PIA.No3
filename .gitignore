@@ -14,3 +14,4 @@ workspace.code-workspace
 out/
 __pycache__/
 wandb/
+configs/env.jsonnet

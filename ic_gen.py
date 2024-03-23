@@ -482,24 +482,17 @@ if __name__ == "__main__":
             #     print(f"Exp: {c}\nhash: {c.out}\n\n")
             print(c.out)
     elif args.subcommand == "sync":
-        # cmd = f'rsync -av --progress {src} {dst}'
-        for c in app:
-            # cmd = ["rsync", *args.sync.rsync_opts, args.sync.src+str(c.out), args.sync.dst]
-            cmd = ["rsync", '-avPR', str(Path(args.sync.src))+'/./' +str(c.out), args.sync.dst]
-            print(cmd)
-            # process = subprocess.Popen(cmd, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            process = subprocess.Popen(cmd, shell=False)
+        folders = [str(Path(args.sync.src))+'/./' +str(c.out) for c in app]
+        cmd = ["rsync", '-avPR', *folders, args.sync.dst]
+        print(cmd)
+        process = subprocess.Popen(cmd, shell=False)
 
-            stdout, stderr = process.communicate()
+        stdout, stderr = process.communicate()
 
-            # Print the output
-            # print(stdout.decode())
-
-            # Print the errors (if any)
-            if stderr:
-                print("Error:")
-                print(stderr.decode())
-        
+        if stderr:
+            print("Error:")
+            print(stderr.decode())
+    
     else:
         raise ValueError(f"Unknown subcommand {args.subcommand}")
 

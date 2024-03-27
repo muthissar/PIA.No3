@@ -12,6 +12,7 @@ workspace.code-workspace
 *.pickle
 
 out/
+out.bak/
 __pycache__/
 wandb/
 configs/env.jsonnet

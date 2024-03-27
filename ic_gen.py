@@ -3,8 +3,11 @@ import hashlib
 from pathlib import Path
 import re
 import subprocess
+import sys
+import tempfile
 from typing import List
 import einops
+import pandas as pd
 import torch
 import os
 
@@ -26,7 +29,9 @@ import multiprocessing
 from ic.config import Config
 from ic.eval_ import eval_
 from ic.beam_search.timepoints import FixedStepTimepoints
+from tqdm.contrib.concurrent import process_map, thread_map
 
+from ic.plot import plot_single_sample
 
 model_dir = 'models/piano_event_performer_2021-10-01_16:03:06'
 # logging.getLogger()
@@ -372,6 +377,7 @@ if __name__ == "__main__":
     subcommands.add_subcommand("gen", gen_subcomm)
     plot_subcomm = ArgumentParser()
     plot_subcomm.add_argument("--recompute", action=ActionYesNo, default=False)
+    plot_subcomm.add_argument("--webapp", action=ActionYesNo, default=False)
     subcommands.add_subcommand("plot", plot_subcomm)
     eval_subcomm = ArgumentParser()
     eval_subcomm.add_argument("--out_file", type=str, default='out/results/result.h5')
@@ -382,6 +388,7 @@ if __name__ == "__main__":
     sync_subcomm = ArgumentParser()
     sync_subcomm.add_argument("--src", type=str, default='rk8.cp.jku.at:/share/hel/home/mathias/devel/python3/PIA.No3/./')
     sync_subcomm.add_argument("--dst", type=str, default='.')
+    sync_subcomm.add_argument("--webapp", action=ActionYesNo, default=False)
     # sync_subcomm.add_argument("--rsync_opts", type=List[str], default='-avP')
     subcommands.add_subcommand("sync", sync_subcomm)
     args = parser.parse_args()
@@ -416,7 +423,6 @@ if __name__ == "__main__":
                 seed = c.seed+rank
                 torch.manual_seed(seed)
                 np.random.seed(seed)
-            
             if 'RANK' not in  os.environ or int(os.environ['RANK']) == 0 :
                 dir = Path(c.out)
                 dir.mkdir(exist_ok=True, parents=True)
@@ -440,7 +446,7 @@ if __name__ == "__main__":
         from ic.plot import plot
         # dataloader_generator,data_processor,decoder_handler = load_pia(device='cpu', skip_model=True)
         for c in app:
-            plot(c, recompute=args.plot.recompute)
+            plot(c, recompute=args.plot.recompute, webapp=args.plot.webapp)
     elif args.subcommand == "eval":
         # eval_(app, init.eval.out_file)
         eval_(app, init.eval.out_file)
@@ -482,16 +488,46 @@ if __name__ == "__main__":
             #     print(f"Exp: {c}\nhash: {c.out}\n\n")
             print(c.out)
     elif args.subcommand == "sync":
-        folders = [str(Path(args.sync.src))+'/./' +str(c.out) for c in app]
-        cmd = ["rsync", '-avPR', *folders, args.sync.dst]
-        print(cmd)
-        process = subprocess.Popen(cmd, shell=False)
+        if args.sync.webapp:
+            with tempfile.NamedTemporaryFile(suffix='.h5') as f:
+                eval_(app, f.name)
+                # NOTE: move to eval_
+                ex = pd.read_hdf(f.name, 'ex')
+                int_df = pd.read_hdf(f.name, 'int_df')
+                tok_df = pd.read_hdf(f.name, 'tok_df')
+                piece_df = pd.read_hdf(f.name, 'piece_df')
+                df = int_df.groupby('ids').agg({'ic_dev': ['mean', ('abs_mean', lambda x: x.abs().mean()), 'std', 'count']})
+                df = ex.merge(df, left_index=True, right_on="ids",how='outer')
+                df = df[df['params'] != 'ref']
+                q = .5
+                only_best = df.groupby(['exps', 'piece']).apply(lambda x: x[x[('ic_dev', 'abs_mean')] < x[('ic_dev', 'abs_mean')].quantile(q)] )
+                paths = []
+                files = only_best.T.apply(lambda x: x.hash + '/'+ x['piece']+'/'+ x['sample']).values
+                def plot_surpress_out(x):
+                    original_stdout = sys.stdout  # Save a reference to the original standard output
+                    sys.stdout = open(os.devnull, 'w')  # Redirect the standard output to a null device
+                    plot_single_sample(x)
+                    sys.stdout = original_stdout  # Restore the standard output to its original value
+                process_map(plot_surpress_out, files, max_workers=60, desc='plotting', chunksize=5)
+                # tqdm.tqdm(list(map(lambda x: plot_single_sample(x), files)))
+                for p in files:
+                    for file in ['plotly_figs/piano_roll_1.json', 'plotly_figs/ic_int_summed_1.json', 'plotly_figs/match_ic_int_summed.json','song.mp3']:
+                        paths.append(p +'/'+file)
+                # TODO: only pick the files which are 
+        else:
+            paths = [str(c.out) for c in app]
+        folders = [str(Path(args.sync.src))+'/./' +p for p in paths]
+        chunk_size = 50
+        for chunk in [folders[i:i + chunk_size] for i in range(0, len(folders), chunk_size)]:
+            cmd = ["rsync", '-avPR', *chunk, args.sync.dst]
+            print(cmd)
+            process = subprocess.Popen(cmd, shell=False)
 
-        stdout, stderr = process.communicate()
+            stdout, stderr = process.communicate()
 
-        if stderr:
-            print("Error:")
-            print(stderr.decode())
+            if stderr:
+                print("Error:")
+                print(stderr.decode())
     
     else:
         raise ValueError(f"Unknown subcommand {args.subcommand}")

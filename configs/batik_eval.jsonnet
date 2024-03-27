@@ -14,7 +14,7 @@
   // local k_traces_arr = [128],
   local step_arr = [0.4, 0.5, 0.6, 0.3, 0.7, 0.2, 0.8, 0.1 , 1.0, 2.0],
   local eval_step = 0.1,
-  local n_pieces = 150,
+  local n_pieces = 300,
   // local step = [0.5]
   // local eval_step = .5
   local BaseConfig = import 'base_config.jsonnet',
@@ -39,6 +39,9 @@
     },
   },
   app:
+    // NOTE: BEST
+    [BaseConfig(128) + data + { experiment+: { time_points_generator+: { init_args+: {step: 0.3 } } }, sampling_config+: { dynamic_temperature_max_ic: 50 }  }] +
+    // NOTE: Ablations....
     [BaseConfig(16) + data + { sampling_config+: { dynamic_temperature_max_ic: dynamic_temperature_max_ic } } for dynamic_temperature_max_ic in dynamic_temperature_max_ic_arr] +
     [BaseConfig(16) + data + { experiment+: { time_points_generator+: { init_args+: { step: step } } } } for step in step_arr] + 
     [BaseConfig(k_trace) + data for k_trace in k_traces_arr]

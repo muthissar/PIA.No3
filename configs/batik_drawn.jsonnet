@@ -1,6 +1,7 @@
 {
   local pieces_fn = import 'pieces.jsonnet',
-  local ic_curve_fn = import 'ic_curves.jsonnet',
+  // local ic_curve_fn = import 'ic_curves_high.jsonnet',
+  local ic_curve_fn = import 'ic_curves_func.jsonnet',
   local channel_weight_mod = import 'weights.jsonnet',
   local BaseConfig = import 'base_config.jsonnet',
   local env = import 'env.jsonnet',
@@ -24,15 +25,26 @@
   //   'rampup2constantlow2shifted',
   //   'rampdown2constantlow2shifted',
   // ],
-  local curves = [
-    'constantlow',
-    'constanthigh',
-    'rampup2',
-    'rampdown2',
-    'square',
-    'squareoffset'
+  // local curves = [
+  //   // ['constantlow', [_, _]],
+  //   ['constanthigh', null, 10.0],
+  //   ['constanthigh', null, 7.5],
+  //   ['constanthigh', null, 5],
+  //   // 'rampup2',
+  //   // 'rampdown2',
+  //   // 'square',
+  //   // 'squareoffset'
+  // ],
+    local curves = [
+    // ['constantlow', null, null],
+    // ['constanthigh', null, null],
+    ['constanthigh', 10.0, 10.0],
+    ['rampdown2', null, null],
+    ['squareoffset', null, null],
+    ['rampup2', null, null],
+    ['square', null, null],
   ],
-  local ic_curves = [ic_curve_fn(curve, channel_weight_mod.channel_idxs(use_channels)) for curve in curves],
+  local ic_curves = [ic_curve_fn(curve=curve[0], channels=channel_weight_mod.channel_idxs(use_channels), low=curve[1], high=curve[2]) for curve in curves],
   app:
     [
       BaseConfig(128) +
@@ -54,12 +66,12 @@
               },
               time_points_generator+: {
                 init_args+: {
-                  step: 0.5,
+                  step: 0.3,
                 }
               }
             
           },
-          samples_per_template: 8,
+          samples_per_template: 74,
         } +
         { 
           sampling_config+: {

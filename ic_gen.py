@@ -359,6 +359,20 @@ def load_pia(device, skip_model=False):
         
     return dataloader_generator,data_processor,decoder_handler
 
+def sync(src : str, dst :str, paths : List[str]):
+    folders = [str(Path(src))+'/./' +p for p in paths]
+    chunk_size = 50
+    for chunk in [folders[i:i + chunk_size] for i in range(0, len(folders), chunk_size)]:
+        cmd = ["rsync", '-avPR', *chunk, dst]
+        print(cmd)
+        process = subprocess.Popen(cmd, shell=False)
+
+        stdout, stderr = process.communicate()
+
+        if stderr:
+            print("Error:")
+            print(stderr.decode())
+
 if __name__ == "__main__":
     parser = ArgumentParser(
         parser_mode="jsonnet",
@@ -388,9 +402,15 @@ if __name__ == "__main__":
     sync_subcomm = ArgumentParser()
     sync_subcomm.add_argument("--src", type=str, default='rk8.cp.jku.at:/share/hel/home/mathias/devel/python3/PIA.No3/./')
     sync_subcomm.add_argument("--dst", type=str, default='.')
-    sync_subcomm.add_argument("--webapp", action=ActionYesNo, default=False)
-    # sync_subcomm.add_argument("--rsync_opts", type=List[str], default='-avP')
     subcommands.add_subcommand("sync", sync_subcomm)
+    sync_webapp_subcomm = ArgumentParser()
+    sync_webapp_subcomm.add_argument("--src", type=str, default='rk8.cp.jku.at:/share/hel/home/mathias/devel/python3/PIA.No3/./')
+    sync_webapp_subcomm.add_argument("--dst", type=str, default='.')
+    # TODO: don't know if it's possible to have multiple ActionConfig files. Therefore create a new one in the subcommand
+    sync_webapp_subcomm.add_argument("--channels_config", type=str, default="configs/batik_channels.jsonnet")
+    sync_webapp_subcomm.add_argument("--n_workers", type=int, default=60)
+    # sync_subcomm.add_argument("--rsync_opts", type=List[str], default='-avP')
+    subcommands.add_subcommand("sync_webapp", sync_webapp_subcomm)
     args = parser.parse_args()
     # init = parser.instantiate_classes(args.config)
     init = parser.instantiate_classes(args)
@@ -488,46 +508,69 @@ if __name__ == "__main__":
             #     print(f"Exp: {c}\nhash: {c.out}\n\n")
             print(c.out)
     elif args.subcommand == "sync":
-        if args.sync.webapp:
-            with tempfile.NamedTemporaryFile(suffix='.h5') as f:
-                eval_(app, f.name)
-                # NOTE: move to eval_
-                ex = pd.read_hdf(f.name, 'ex')
-                int_df = pd.read_hdf(f.name, 'int_df')
-                tok_df = pd.read_hdf(f.name, 'tok_df')
-                piece_df = pd.read_hdf(f.name, 'piece_df')
-                df = int_df.groupby('ids').agg({'ic_dev': ['mean', ('abs_mean', lambda x: x.abs().mean()), 'std', 'count']})
-                df = ex.merge(df, left_index=True, right_on="ids",how='outer')
-                df = df[df['params'] != 'ref']
-                q = .5
-                only_best = df.groupby(['exps', 'piece']).apply(lambda x: x[x[('ic_dev', 'abs_mean')] < x[('ic_dev', 'abs_mean')].quantile(q)] )
-                paths = []
-                files = only_best.T.apply(lambda x: x.hash + '/'+ x['piece']+'/'+ x['sample']).values
-                def plot_surpress_out(x):
-                    original_stdout = sys.stdout  # Save a reference to the original standard output
-                    sys.stdout = open(os.devnull, 'w')  # Redirect the standard output to a null device
-                    plot_single_sample(x)
-                    sys.stdout = original_stdout  # Restore the standard output to its original value
-                process_map(plot_surpress_out, files, max_workers=60, desc='plotting', chunksize=5)
-                # tqdm.tqdm(list(map(lambda x: plot_single_sample(x), files)))
-                for p in files:
-                    for file in ['plotly_figs/piano_roll_1.json', 'plotly_figs/ic_int_summed_1.json', 'plotly_figs/match_ic_int_summed.json','song.mp3']:
-                        paths.append(p +'/'+file)
-                # TODO: only pick the files which are 
-        else:
-            paths = [str(c.out) for c in app]
-        folders = [str(Path(args.sync.src))+'/./' +p for p in paths]
-        chunk_size = 50
-        for chunk in [folders[i:i + chunk_size] for i in range(0, len(folders), chunk_size)]:
-            cmd = ["rsync", '-avPR', *chunk, args.sync.dst]
-            print(cmd)
-            process = subprocess.Popen(cmd, shell=False)
-
-            stdout, stderr = process.communicate()
-
-            if stderr:
-                print("Error:")
-                print(stderr.decode())
+        paths = [str(c.out) for c in app]
+        sync(args.sync.src, args.sync.dst, paths)
+    elif args.sync_webapp:
+        
+        parser = ArgumentParser(
+        parser_mode="jsonnet",
+        )
+        parser.add_argument("--app", type=List[Config])  
+        parser.add_argument("--config", action=ActionConfigFile)
+        args_channels = parser.parse_args(['--config', args.sync_webapp.channels_config])
+        # init = parser.instantiate_classes(args.config)
+        init_channels = parser.instantiate_classes(args_channels)
+        app_channels : List[Config] = init_channels.app
+        c = app_channels[0]
+        rng = np.random.default_rng(0)
+        n_normal_samples = 300
+        pieces = sorted(piece for piece in c.out.glob('*') if piece.name.isnumeric())
+        piece_idx = rng.choice(np.arange(len(pieces)), n_normal_samples, replace=False)
+        pieces = [pieces[i] for i in piece_idx]
+        samples_real_music = []
+        for piece in pieces:
+            if Path(piece, 'temp', 'ic.pt').exists():
+                # samples.append(str(piece.joinpath('temp')))
+                samples_ = [sample for sample in piece.glob('*') if sample.name.isnumeric()]
+                sample = rng.choice(samples_, 1, replace=False)[0]
+                if Path(sample, 'ic.pt').exists():
+                    samples_real_music.append(str(sample))
+        paths = []
+        for sample in samples_real_music:
+            for file in ['plotly_figs/piano_roll_0.json', 'plotly_figs/ic_int_summed_0.json']:
+                paths.append("/".join([sample, file]))
+            paths.append(str(Path(sample).parent.joinpath('temp','song.mp3')))
+        with tempfile.NamedTemporaryFile(suffix='.h5') as f:
+            eval_(app, f.name)
+            # NOTE: move to eval_
+            ex = pd.read_hdf(f.name, 'ex')
+            int_df = pd.read_hdf(f.name, 'int_df')
+            tok_df = pd.read_hdf(f.name, 'tok_df')
+            piece_df = pd.read_hdf(f.name, 'piece_df')
+        df = int_df.groupby('ids').agg({'ic_dev': ['mean', ('abs_mean', lambda x: x.abs().mean()), 'std', 'count']})
+        df = ex.merge(df, left_index=True, right_on="ids",how='outer')
+        df = df[df['params'] != 'ref']
+        
+        def filter_best(x : pd.DataFrame):
+            # q = .5
+            # filtered = x[x[('ic_dev', 'abs_mean')] < x[('ic_dev', 'abs_mean')].quantile(q)]
+            n_best = 25
+            filtered = x.sort_values(('ic_dev', 'abs_mean')).head(n_best)
+            return filtered
+        only_best = df.groupby(['exps', 'piece']).apply(filter_best)
+        samples_drawn = only_best.T.apply(lambda x: x.hash + '/'+ x['piece']+'/'+ x['sample']).values.tolist()
+        # def plot_surpress_out(x):
+        #     original_stdout = sys.stdout  # Save a reference to the original standard output
+        #     sys.stdout = open(os.devnull, 'w')  # Redirect the standard output to a null device
+        #     plot_single_sample(x)
+        #     sys.stdout = original_stdout  # Restore the standard output to its original value
+        process_map(plot_single_sample, samples_drawn + samples_real_music, max_workers=args.sync_webapp.n_workers, desc='plotting', chunksize=5)
+        # tqdm.tqdm(list(map(lambda x: plot_single_sample(x), files)))
+        for p in samples_drawn:
+            for file in ['plotly_figs/piano_roll_1.json', 'plotly_figs/ic_int_summed_1.json', 'plotly_figs/match_ic_int_summed.json','song.mp3']:
+                paths.append(p +'/'+file)
+        # TODO: only pick the files which are 
+        sync(args.sync_webapp.src, args.sync_webapp.dst, paths)
     
     else:
         raise ValueError(f"Unknown subcommand {args.subcommand}")

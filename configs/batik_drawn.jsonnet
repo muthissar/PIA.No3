@@ -38,11 +38,12 @@
     local curves = [
     // ['constantlow', null, null],
     // ['constanthigh', null, null],
-    ['constanthigh', 10.0, 10.0],
+    ['constantlow', 5.0, 5.0],
     ['rampdown2', null, null],
     ['squareoffset', null, null],
     ['rampup2', null, null],
     ['square', null, null],
+    // ['constanthigh', 10.0, 10.0],
   ],
   local ic_curves = [ic_curve_fn(curve=curve[0], channels=channel_weight_mod.channel_idxs(use_channels), low=curve[1], high=curve[2]) for curve in curves],
   app:
@@ -71,7 +72,7 @@
               }
             
           },
-          samples_per_template: 74,
+          samples_per_template: 144,
         } +
         { 
           sampling_config+: {

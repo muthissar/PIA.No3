@@ -102,9 +102,7 @@ class Interpolator(ICCurve):
 
         self.metric_times = self.metric_times[..., None]
         # self.metric = min(self.metric, self.metric_cap)
-        if self.metric_clip is None:
-            warn('Most likely a cap needs to be set. For instance by calculating quantile .95')
-        else:
+        if self.metric_clip is not  None:
             # torch.as_tensor(self.metric_clip, dtype=torch.float32)
             self.metric = torch.where(self.metric > self.metric_clip, self.metric_clip, self.metric)
         assert self.metric_times.dim() == 4 and self.metric.dim() == 3 # bz, tokens, channels, (t=1?)

@@ -146,6 +146,7 @@ class DataPiece(Data):
     pieces : Iterable[Piece]
     # TODO: deprecate
     cache_path : str = field(repr=False)
+    pad_before: bool = field(repr=False, default=False)
     def __post_init__(self):
         os.environ['PIA_CACHE_PATH'] = self.cache_path
     def __len__(self) -> int:
@@ -160,22 +161,27 @@ class DataPiece(Data):
             # NOTE: parallelize over number of samples per piece
             sequence = ds.process_score(piece.path)
             orig_seq_length = len(sequence['pitch'])
-            start_node = piece.start_node if piece.start_node > 0 else 0
-            # NOTE: this is available in data_processor.num_events_before
-            warn('hard coded num_before tokens')
-            n_begin_notes = 256
-            if piece.start_node > 0:
-                # raise NotImplementedError('Test that the following line works by also when piece.start <=0')
-                warn('Test that the following line works by also when piece.start <=0')
-            end_node = piece.start_node + n_begin_notes + piece.n_inpaint + piece.end_window if piece.end_window is not None else None
-            sequence = {k : v[slice(start_node, end_node)] for k,v in sequence.items()}
-            # if piece.start_node < 0:
-            #     raise NotImplementedError('Tetst that indeed it works')
-            warn('This put\'s the first token of ')
-            sequence = ds.add_start_end_symbols(
-                sequence, start_time=piece.start_node, sequence_size=ds.sequence_size
-            )
-            # Tokenize
+            if not self.pad_before:
+                start_node = piece.start_node if piece.start_node > 0 else 0
+                # NOTE: this is available in data_processor.num_events_before
+                warn('hard coded num_before tokens')
+                n_begin_notes = 256
+                if piece.start_node > 0:
+                    # raise NotImplementedError('Test that the following line works by also when piece.start <=0')
+                    warn('Test that the following line works by also when piece.start <=0')
+                end_node = piece.start_node + n_begin_notes + piece.n_inpaint + piece.end_window if piece.end_window is not None else None
+                sequence = {k : v[slice(start_node, end_node)] for k,v in sequence.items()}
+                # if piece.start_node < 0:
+                #     raise NotImplementedError('Tetst that indeed it works')
+                warn('This put\'s the first token of ')
+                sequence = ds.add_start_end_symbols(
+                    sequence, start_time=piece.start_node, sequence_size=ds.sequence_size
+                )
+                # Tokenize
+            else:
+                sequence = ds.add_start_end_symbols(
+                    sequence, start_time=piece.start_node, sequence_size=ds.sequence_size
+                )
             sample = ds.tokenize(sequence)
             x = torch.tensor([sample[e] for e in self.dataloader_generator.features])
             original_x = einops.rearrange(x, 'f n -> 1 n f')

@@ -12,7 +12,8 @@ function (k_traces)
     time_points_generator: {
       class_path: 'ic.beam_search.timepoints.FixedStepTimepoints',
       init_args: {
-        step: 0.5,
+        // step: 0.5,
+        step: 0.3,
         eval_step: 0.1,
         k_traces: k_traces,
         tol_placeholder_duration: 0.2,

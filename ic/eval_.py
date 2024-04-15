@@ -239,16 +239,22 @@ def present_df(ex, int_df, tok_df):
 
     print(res_not.round(3))
 
-def get_batik_matched_note_array(piece_name: str, batik_dir: str='/share/hel/home/mathias/datasets/batik_plays_mozart', recompute_cache : bool =False) -> np.ndarray:
+def get_batik_matched_note_array(piece_name: str, batik_dir: str='/share/hel/home/mathias/datasets/batik_plays_mozart', recompute_cache : bool =False, disable_user_warnings :bool =True) -> np.ndarray:
     cache_file = Path(appdirs.user_cache_dir(), 'pia_eval', f'{piece_name}_note_array.pt')
     if cache_file.exists() and not recompute_cache:
         matched_array = torch.load(str(cache_file))
     else:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         # harmony = pd.read_csv(Path(batik_dir, 'score_parts_annotated', f'{piece_name}_spart_harmony.csv'), index_col='id')
-        score = pt.load_score(Path(batik_dir, 'scores', f'{piece_name}.musicxml'))
-        performance, alignment = pt.load_match(Path(batik_dir, 'match', f'{piece_name}.match'), first_note_at_zero=True)
+        score = pt.load_score(Path(batik_dir, 'scores', f'{piece_name}.musicxml'))        
+        alignment, pnote_array = get_performance(piece_name, batik_dir)
         part = score.parts[0]
+        # NOTE: while unfoloding there are a million UserWarnings in /share/hel/home/mathias/devel/python3/partitura/partitura/utils/generic.py:239
+        if disable_user_warnings:
+            import warnings
+            warnings.filterwarnings("ignore", category=UserWarning)
+        part = pt.score.unfold_part_alignment(part=part, alignment=alignment ) #score.part.unfold_part_alignme
+        snote_array = part.note_array(include_pitch_spelling=True, include_key_signature=True)
         data = pd.read_csv(Path(batik_dir, 'score_parts_annotated', f'{piece_name}_spart_harmony.csv'))
         data = data.assign(
             ks_fifths = pd.Series(dtype=np.int32),
@@ -270,11 +276,19 @@ def get_batik_matched_note_array(piece_name: str, batik_dir: str='/share/hel/hom
             # Therefore we do not add the quality to the RomanNumeral object. Then it is extracted from the text.
             # Local key is in relation to the global key.
             # TODO: in kv331_3_spart_harmony.csv/#L760 the local key is #vi, which is not supported by Roman2Interval_Min
-            if row["globalkey"].islower():
-                transposition_interval = spt.Roman2Interval_Min[row["localkey"]]
+            # NOTE: attempt at solving the above issue
+            local_key = row["localkey"]
+            if local_key.startswith("#"):
+                return
+                local_key = local_key[1:]
+                sharp_step = 7
             else:
-                transposition_interval = spt.Roman2Interval_Maj[row["localkey"]]
-
+                sharp_step = 0
+            if row["globalkey"].islower():
+                transposition_interval = spt.Roman2Interval_Min[local_key]
+            else:
+                transposition_interval = spt.Roman2Interval_Min[local_key]
+            transposition_interval.number = (transposition_interval.number + sharp_step) %12
             key_step = re.search(r"[a-gA-G]", row["globalkey"]).group(0)
             key_alter = re.search(r"[#b]", row["globalkey"]).group(0) if re.search(r"[#b]", row["globalkey"]) else ""
             key_alter = key_alter.replace("b", "-")
@@ -287,12 +301,12 @@ def get_batik_matched_note_array(piece_name: str, batik_dir: str='/share/hel/hom
             ks_mode = 1 if ks_mode == 'major' else -1
             data.loc[idx, ['ks_fifths', 'ks_mode']] = [ks_fifths, ks_mode]
         data[['ks_fifths', 'ks_mode']] = data[['ks_fifths', 'ks_mode']].fillna(method='ffill')
-        part = pt.score.unfold_part_alignment(part=part, alignment=alignment ) #score.part.unfold_part_alignme
-        snote_array = part.note_array(include_pitch_spelling=True,include_key_signature=True)
         data.index = data.id
         snote_array['ks_fifths'] = data.loc[snote_array['id'], 'ks_fifths']
         snote_array['ks_mode'] = data.loc[snote_array['id'], 'ks_mode']
         measures = part.measure_number_map(snote_array['onset_div'])
+        # [i for i, m  in enumerate(np.diff(measures[np.diff(measures, prepend=0) != 0]),prepend=0) if i < 0]
+         
         # NOTE: rewritem measure numbers (incorrect due to repeats)
         counter = 0
         for i, is_change  in enumerate(np.diff(measures, prepend=-1)):
@@ -305,17 +319,23 @@ def get_batik_matched_note_array(piece_name: str, batik_dir: str='/share/hel/hom
         # data = pd.Series(np.zeros(len(snote_array), dtype=bool),index=snote_array['id'])
             # data.loc[harmony.index] = ~harmony.chord.isna()
         # snote_array = np.lib.recfunctions.append_fields(snote_array, names=names, data=[data])
-        pnote_array = performance.note_array()
         index_in_score_note_array, index_in_performance_notearray  = pt.musicanalysis.performance_codec.get_matched_notes(
                 spart_note_array=snote_array, 
                 ppart_note_array=pnote_array, 
                 alignment=alignment,
             ).T
         append_names = ['step', 'alter', 'octave', 'ks_fifths', 'ks_mode', "mn"]
+        # append_names = ['step', 'alter', 'octave', "mn"]
         append_data = [snote_array[index_in_score_note_array][name] for name in append_names] 
         matched_array = np.lib.recfunctions.append_fields(pnote_array[index_in_performance_notearray], names=append_names, data=append_data)
         torch.save(matched_array, str(cache_file))
+        pt.save_score_midi(part, cache_file.with_suffix('.mid'))
     return matched_array
+
+def get_performance(piece_name, batik_dir : str='/share/hel/home/mathias/datasets/batik_plays_mozart'):
+    performance, alignment = pt.load_match(Path(batik_dir, 'match', f'{piece_name}.match'), first_note_at_zero=True)
+    pnote_array = performance.note_array()
+    return alignment,pnote_array
 
 def get_all_token_ics_batik() -> dict:
     # get ic of all pieces in the batik ds. Asusme that the same shift, and number of notes was used for all examples.
@@ -369,16 +389,29 @@ def get_all_token_ics_batik() -> dict:
     return piece_dict
 
 
-def compute_windowed_metric(piece_name : str, piece_dict: dict):
+def compute_windowed_metric(piece_name : str, piece_dict: dict, matched=True) -> list:
         piece = piece_dict[piece_name]
-        matched_array = get_batik_matched_note_array(piece_name, recompute_cache=False)
-        if not 'mn' in matched_array.dtype.names:
-            raise ValueError('No matched notes')
+        if matched:
+            matched_array = get_batik_matched_note_array(piece_name, recompute_cache=False)
+            if (matched_array['ks_mode'] == np.iinfo(np.int32).min).any() or (np.abs(matched_array['ks_fifths'])  == np.iinfo(np.int32).min).any().any():
+                return [None for _ in range(6)]
+                # raise ValueError(f'No key signature for {piece_name}')
+            if not 'mn' in matched_array.dtype.names:
+                raise ValueError('No matched notes')
+        else:
+            _, matched_array = get_performance(piece_name)
         # assert pnote_array.shape[0] == piece['toks'].shape[0]
+        # NOTE: extract after copmputation
+        cw = [0.9099181, 0, 0, 0.68306011]
+        # if channel_weight == 'pitch':
+        #     cw[3] = 0.0
+        # elif channel_weight == 'timeshift':
+        #     cw[0] = 0.0
+        # elif channel_weight != 'both':
+        #     raise NotImplementedError
         weight = Hann(
                 window_size=2.0,
-                channel_weight=[0.9099181, 0, 0, 0.68306011]
-                # channel_weight=[0.9099181, 0, 0, 0.0]
+                channel_weight=cw
             )
         interpolator = Interpolator(
             # NOTE: 
@@ -386,41 +419,42 @@ def compute_windowed_metric(piece_name : str, piece_dict: dict):
             metric = [piece['tok_ics']],
             weight_fn = weight
         )
-        # NOTE: compute number of notes
         onsets = matched_array['onset_sec']
-        notes_window_size = 4.0
-        end = max(matched_array['onset_sec']) + notes_window_size
-        notes_window_endpoints = np.arange(0, end, notes_window_size)
-        notes_window_indices = np.digitize(onsets, notes_window_endpoints) -1
-        notes_window_counts = np.bincount(notes_window_indices,minlength=len(notes_window_endpoints)-1)
-        wins = [torch.arange(wl + weight.window_size, wh, 0.1) for wl, wh in zip(notes_window_endpoints[:-1], notes_window_endpoints[1:])]
-        win_ics_notes = interpolator(wins)
+        # NOTE: compute number of notes within non overlapping intervals
+        # notes_window_size = 1.0
+        # end = max(matched_array['onset_sec']) + notes_window_size
+        # notes_window_endpoints = np.arange(0, end, notes_window_size)
+        # notes_window_indices = np.digitize(onsets, notes_window_endpoints) -1
+        # notes_window_counts = np.bincount(notes_window_indices,minlength=len(notes_window_endpoints)-1)
+        # wins = [torch.arange(wl + weight.window_size, wh, 0.1) for wl, wh in zip(notes_window_endpoints[:-1], notes_window_endpoints[1:])]
+        # win_ics_notes = interpolator(wins)
         # # NOTE: it might be more appropriate to sum instead of mean, if the windows have different legnths, or better yet, do the max.
-        ics_summed_notes = [win_ic.sum(axis=1).mean().item() for win_ic in win_ics_notes]
+        # ics_summed_notes = [win_ic.sum(axis=1).mean().item() for win_ic in win_ics_notes]
         # res.setdefault(piece_name, {})['n_notes'] = [ics_summed_notes, win_ics_notes, notes_window_counts]
         # pearsonr(ics_summed, notes_window_counts)
-        # # score_positions = np.unique(onsets)
-        # # ss = score_positions
+        score_positions = np.unique(onsets)
         # ss = onsets
+        ss = score_positions
+        ss = np.sort(ss)[:1000]
         # # NOTE: compute tonaltension
-        # w_size = 1.0
-        # wsl = np.ones(len(ss), dtype=np.float32)*w_size / 2
-        # wsh = np.ones(len(ss), dtype=np.float32)*w_size / 2
-        # ws = np.stack([wsl,wsh])
+        w_size = 1.0
+        wsl = np.ones(len(ss), dtype=np.float32)*w_size / 2
+        wsh = np.ones(len(ss), dtype=np.float32)*w_size / 2
+        ws = np.stack([wsl,wsh], axis=1)
         
         # measure_changes,  = np.where(np.diff(matched_array['mn'], prepend=-1))
-        ws = []
-        ss = []
-        for m in np.unique(matched_array['mn']):
-             notes_in_measure = matched_array[matched_array['mn'] == m]
-             min_time = min(notes_in_measure['onset_sec'])
-             max_time = max(notes_in_measure['onset_sec'])
-             mid = (min_time + max_time) / 2
-             ws.append((mid-min_time, max_time-mid))
-             ss.append(mid)
-        ss = np.array(ss)
-        wsl, wsh = zip(*ws)
-        ws = np.stack(ws, axis=0)
+        # ws = []
+        # ss = []
+        # for m in np.unique(matched_array['mn']):
+        #      notes_in_measure = matched_array[matched_array['mn'] == m]
+        #      min_time = min(notes_in_measure['onset_sec'])
+        #      max_time = max(notes_in_measure['onset_sec'])
+        #      mid = (min_time + max_time) / 2
+        #      ws.append((mid-min_time, max_time-mid))
+        #      ss.append(mid)
+        # ws = np.stack(ws, axis=0)
+        # wsl, wsh = zip(*ws)
+        # ss = np.array(ss)
         # wins = [(matched_array[i-1]['onset_sec'], matched_array[i]['onset_sec']) for i in range(1, len(measure_changes))]
         tt = pt.musicanalysis.estimate_tonaltension(matched_array, ss=ss, ws=ws)
         # NOTE: aggregate results bar level..
@@ -428,15 +462,23 @@ def compute_windowed_metric(piece_name : str, piece_dict: dict):
 
         # offset_comp_for_ic_memory = weight.window_size
         offset_comp_for_ic_memory = 0.0
-        wins = [torch.arange(o-wl + offset_comp_for_ic_memory, o+wh, 0.1) for o, wl, wh in zip(ss, wsl, wsh)]
-        win_ics_tt = interpolator(wins)
+        wins_tt = [torch.arange(o-wl + offset_comp_for_ic_memory, o+wh, 0.1) for o, wl, wh in zip(ss, wsl, wsh)]
+        # ics_tt = [t.numpy() for t in interpolator(wins_tt)]
+        ics_tt = interpolator(wins_tt)
         # NOTE: it might be more appropriate to sum instead of mean, if the windows have different legnths, or better yet, do the max.
-        ics_summed_tt = [win_ic.sum(axis=1).mean().item() for win_ic in win_ics_tt]
-        # res.setdefault(piece_name, {})['tt'] = [ics_summed, win_ics, tt]
-        # names = [*(tt.dtype.names[1:])]
-        # data = [tt[n] for n in names]
-        # names.append('ic')
-        # data.append(np.array(ics_summed,np.float32))
-        # df = pd.DataFrame(np.lib.recfunctions.append_fields(matched_array, names=names, data=data).filled())
-        # return (ics_summed, *[tt[feat].tolist() for feat in ['cloud_diameter', 'cloud_momentum', 'tensile_strain']])
-        return ics_summed_notes, win_ics_notes, notes_window_counts,  ics_summed_tt, win_ics_tt, tt
+        # ics_summed_tt = [win_ic.sum(axis=1).mean().item() for win_ic in win_ics_tt]
+        
+        # NOTE: compute number of notes within the score postion onsets...
+        # notes_window_counts = []
+        # for s, l, h in tqdm.tqdm(list(zip(ss, wsl, wsh))):
+        #     count = 0
+        #     for note in matched_array[np.argsort(matched_array)]:
+        #         if note['onset_sec'] > s - l and note['onset_sec'] < s + h:
+        #             count += 1
+        #         elif note['onset_sec'] > s + h:
+        #             break
+        #     notes_window_counts.append(count)
+        notes_window_counts = (((matched_array['onset_sec'][None] - (ss-wsl)[:, None])>0) & (matched_array['onset_sec'][None] -  (ss+wsh)[:, None]< 0)).sum(axis=1)
+        wins_notes = wins_tt
+        ics_notes = ics_tt
+        return ics_notes, wins_notes, notes_window_counts,  ics_tt, wins_tt, tt

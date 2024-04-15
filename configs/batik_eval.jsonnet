@@ -7,14 +7,13 @@
   // local weight = channel_weight_mod.mv_avg(1, 0, 'normalized_weights', use_channels),
   // local use_channels_arr = [['pitch', 'time_shift'], ['pitch'], ['time_shift']],
   local weight = channel_weight_mod.hann(2.0, 'normalized_weights', use_channels),
-  local k_traces_arr = [1, 2, 4, 16, 64, 128],
-  // local dynamic_temperature_max_ic_arr = [50, 40, 20, 10, 5, 2.5, 1.0],
-  local dynamic_temperature_max_ic_arr = [20, 30, 40, 50, 60, 70, 80, 120, 10],
+  local k_traces_arr = [1, 2, 4, 8, 16, 24, 32, 64, 96, 128],
+  local dynamic_temperature_max_ic_arr = [10, 20, 30, 40, 50, 60, 70, 80, 120],
   // local dynamic_temperature_max_ic_arr = [30,],
   // local k_traces_arr = [128],
   local step_arr = [0.4, 0.5, 0.6, 0.3, 0.7, 0.2, 0.8, 0.1 , 1.0, 2.0],
   local eval_step = 0.1,
-  local n_pieces = 300,
+  local n_pieces = 400,
   // local step = [0.5]
   // local eval_step = .5
   local BaseConfig = import 'base_config.jsonnet',

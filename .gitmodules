@@ -1,0 +1,3 @@
+[submodule "iic"]
+	path = iic
+	url = git@github.com:muthissar/iic.git

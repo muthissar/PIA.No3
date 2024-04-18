@@ -1,4 +1,3 @@
-from warnings import warn
 import einops
 import numpy as np
 import torch
@@ -45,13 +44,9 @@ class LinearInterpolation(DrawnICCurve):
         res = [r[:l] for r, l in zip(res, lens)]
         return res
 
-
-# res = torch.tensor(np.stack([np.interp(t* self._placeholder_scale, self._timepoints, ics) for ics in self._ics.T], axis=-1))
-# return res.view(*orig_shape, -1)
-
 @dataclass
 class Piecewise(DrawnICCurve):
-# NOTE alternatively scipy.interpolate.interp1d(x, y, kind='nearest'), but it's deprecated
+    # NOTE alternatively scipy.interpolate.interp1d(x, y, kind='nearest'), but it's deprecated
     timepoints: List[float]
     ics: List[List[float]]
     # time_relative: bool = False
@@ -116,7 +111,7 @@ class Interpolator(ICCurve):
         time_diffs = t[:, None, None] - self.metric_times
         # rear = einops.rearrange(time_diffs, 'bz obs channels time_eval -> obs (bz channels time_eval)')
         # hehe = rear.unique(dim=0, return_counts=True)
-        w = self.weight_fn(time_diffs, self.metric)
+        w = self.weight_fn(time_diffs)
         w[time_diffs <.0] = 0.
         # NOTE: the ic padding cancels automatically.
 

@@ -239,6 +239,57 @@ def present_df(ex, int_df, tok_df):
 
     print(res_not.round(3))
 
+def get_batik_matched_note_array_2(piece_name: str, batik_dir: str='/share/hel/home/mathias/datasets/batik_plays_mozart', recompute_cache : bool =False, disable_user_warnings :bool =True) -> np.ndarray:
+    cache_file = Path(appdirs.user_cache_dir(), 'pia_eval_2', f'{piece_name}_pnote_array.pt')
+    if cache_file.exists() and not recompute_cache:
+        matched_parray = torch.load(str(cache_file))
+        matched_sarray = torch.load(str(Path(appdirs.user_cache_dir(), 'pia_eval_2', f'{piece_name}_snote_array.pt')))
+        # part = torch.load(str(Path(appdirs.user_cache_dir(), 'pia_eval_2', f'{piece_name}_part.pt')))
+    else:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        # harmony = pd.read_csv(Path(batik_dir, 'score_parts_annotated', f'{piece_name}_spart_harmony.csv'), index_col='id')
+        score = pt.load_score(Path(batik_dir, 'scores', f'{piece_name}.musicxml'))        
+        alignment, pnote_array = get_performance(piece_name, batik_dir)
+        part = score.parts[0]
+        # NOTE: while unfoloding there are a million UserWarnings in /share/hel/home/mathias/devel/python3/partitura/partitura/utils/generic.py:239
+        if disable_user_warnings:
+            import warnings
+            warnings.filterwarnings("ignore", category=UserWarning)
+        part  = pt.score.unfold_part_alignment(part=part, alignment=alignment ) #score.part.unfold_part_alignme
+        snote_array = part.note_array(
+            include_metrical_position=True,
+            include_staff=True
+            )
+        measures = part.measure_number_map(snote_array['onset_div'])
+        counter = 0
+        new_measures = np.copy(measures)
+        for i, is_change  in enumerate(np.diff(measures, prepend=-1)):
+            if is_change:
+                counter+=1
+            new_measures[i] = counter
+        snote_array = np.lib.recfunctions.append_fields(snote_array, names=["mn","nmn"], data=[measures,new_measures])
+        # new_measures = np.array(new_measures)
+        # names = ['chord_info']
+        # data = pd.Series(np.zeros(len(snote_array), dtype=bool),index=snote_array['id'])
+            # data.loc[harmony.index] = ~harmony.chord.isna()
+        # snote_array = np.lib.recfunctions.append_fields(snote_array, names=names, data=[data])
+        index_in_score_note_array, index_in_performance_notearray  = pt.musicanalysis.performance_codec.get_matched_notes(
+                spart_note_array=snote_array, 
+                ppart_note_array=pnote_array, 
+                alignment=alignment,
+            ).T
+        matched_parray = pnote_array[index_in_performance_notearray]
+        append_names = ['rel_onset_div', 'tot_measure_div', 'staff', "mn", 'nmn']
+        # append_names = ['step', 'alter', 'octave', "mn"]
+        append_data = [snote_array[index_in_score_note_array][name] for name in append_names] 
+        matched_parray = np.lib.recfunctions.append_fields(matched_parray, names=append_names, data=append_data)
+
+        matched_sarray = snote_array[index_in_score_note_array]
+        torch.save(matched_parray, str(cache_file))
+        torch.save(matched_sarray, str(Path(appdirs.user_cache_dir(), 'pia_eval_2', f'{piece_name}_snote_array.pt')))
+        torch.save(part, str(Path(appdirs.user_cache_dir(), 'pia_eval_2', f'{piece_name}_part.pt')))
+    return matched_parray, matched_sarray
+
 def get_batik_matched_note_array(piece_name: str, batik_dir: str='/share/hel/home/mathias/datasets/batik_plays_mozart', recompute_cache : bool =False, disable_user_warnings :bool =True) -> np.ndarray:
     cache_file = Path(appdirs.user_cache_dir(), 'pia_eval', f'{piece_name}_note_array.pt')
     if cache_file.exists() and not recompute_cache:

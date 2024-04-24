@@ -6,7 +6,7 @@ import torch
 import tqdm
 from ic.eval.rhythm import Metrics
 from ic.eval.rhythm.util import get_pattern
-from ic.eval_ import get_all_token_ics_batik, get_batik_matched_note_array
+from ic.eval_ import get_all_token_ics_batik, get_batik_matched_note_array_2
 from ic.curves import Interpolator
 from ic.curves.weight import Hann
 import appdirs
@@ -33,41 +33,16 @@ def r_confidence_interval(r, alpha, n):
     return (z_to_r(lo), z_to_r(hi))
 print_old = builtins.print
 builtins.print = lambda *args, **kwargs : None
-# from MIDIFunctions import plot_beats
 
-
-
-# Datasets
-
-# Povel & Essens patterns
-# pm_PovEss = pretty_midi.PrettyMIDI('./data/Povel&Essens 1985/Povel&Essens - 1.mid')
-
-# Essens patterns
-# pm_Ess = pretty_midi.PrettyMIDI('./data/Essens 1995/Essens - 1.mid')
-
-# Fitch & Rosenfeld patterns
-# pm_FitRos = pretty_midi.PrettyMIDI('./data/Fitch&Rosenfeld 2007/Fitch&Rosenfeld - 15.mid')
-
-
-
-# Select a single pattern for rhythmic complexity analysis
-# pm = pm_FitRos
 import partitura as pt
 import numpy as np
-# failed = {}
-
-# if channel_weight == 'pitch':
-#     cw[3] = 0.0
-# elif channel_weight == 'timeshift':
-#     cw[0] = 0.0
-# elif channel_weight != 'both':
-#     raise NotImplementedError
 complexities = {}
 piece_dict =  get_all_token_ics_batik()
 # for p in tqdm.tqdm(list(Path('/share/hel/home/mathias/datasets/batik_plays_mozart/scores/').glob('*.musicxml'))):
-for cached in tqdm.tqdm(list(Path(appdirs.user_cache_dir(), 'pia_eval').glob(f'*_note_array.pt'))):
+for cached in tqdm.tqdm(list(Path(appdirs.user_cache_dir(), 'pia_eval_2').glob(f'*_snote_array.pt'))):
     piece = cached.stem[:7]
-    p = Path('/share/hel/home/mathias/datasets/batik_plays_mozart/scores',f'{piece}.musicxml')
+    batik_dir = '/share/hel/home/mathias/datasets/batik_plays_mozart'
+    p = Path(batik_dir,'scores',f'{piece}.musicxml')
     cw = [0.9099181, 0, 0, 0.68306011]
     weight = Hann(
         window_size=2.0,
@@ -79,18 +54,25 @@ for cached in tqdm.tqdm(list(Path(appdirs.user_cache_dir(), 'pia_eval').glob(f'*
         metric = [piece_dict[piece]['tok_ics']],
         weight_fn = weight
     )
-    matched_array = get_batik_matched_note_array(piece, recompute_cache=False)
+    matched_parray, matched_sarray = get_batik_matched_note_array_2(piece, recompute_cache=False)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore")
         score = pt.load_musicxml(str(p))
         part = score.parts[0]
+        perf, alignment = pt.load_match(Path(batik_dir, 'match', f'{piece}.match'), first_note_at_zero=True)
+        part = pt.score.unfold_part_alignment(part=part, alignment=alignment ) #score.part.unfold_part_alignme
         snote_array = part.note_array(
             # include_pitch_spelling=True,
             # include_key_signature=True,
-            # include_metrical_position=True,
+            include_metrical_position=True,
             include_staff=True,
         )
         measures = part.measure_number_map(snote_array['onset_div'])
+        counter = 0
+        for i, is_change  in enumerate(np.diff(measures, prepend=-1)):
+            if is_change:
+                counter+=1
+            measures[i] = counter
         metpos = part.metrical_position_map(snote_array['onset_div'])
         staffs = snote_array['staff']
     # NOTE: map to quarters.
@@ -98,13 +80,10 @@ for cached in tqdm.tqdm(list(Path(appdirs.user_cache_dir(), 'pia_eval').glob(f'*
     unique_measures = np.unique(measures)
 
     complexities[p.stem] = {
-            'rhythmic_complexity':{
-                # 'smith': [],
-                # 'lhl': [],
-            },
+            'rhythmic_complexity':{},
             'iic': []
     }
-    take_n_measures = 20
+    take_n_measures = 80
     # for meas_n in unique_measures[slice(0, take_n_measures)]:
     # NOTE: all scores start at t=0.0
     measure_start = 0.0
@@ -113,6 +92,8 @@ for cached in tqdm.tqdm(list(Path(appdirs.user_cache_dir(), 'pia_eval').glob(f'*
         for staff in np.unique(staffs):
             meas_n = unique_measures[i]
             measure =  metpos[(measures == meas_n) & (staffs == staff )]
+            if len(measure) == 0:
+                continue
             # TODO: figure out if the lengths needs to be normalized
             assert len(set(measure[:, 1])) == 1, "Not implimented if the denom is changing during a measure."
             length = measure[0,1]
@@ -124,17 +105,29 @@ for cached in tqdm.tqdm(list(Path(appdirs.user_cache_dir(), 'pia_eval').glob(f'*
             
             # Instantiate a metric class
             metrics = Metrics(length, onsets_indeces)
-            for func_name, func in {'lhl': metrics.getLonguetHigginsLeeComplexity, 'smith': metrics.getSmithHoningComplexity}.items():
+            compl_metrics = {
+                'lhl': metrics.getLonguetHigginsLeeComplexity,
+                'smith': metrics.getSmithHoningComplexity,
+                'iecl': lambda : metrics.getInformationEntropyComplexity()[1],
+                'iecg': lambda : metrics.getInformationEntropyComplexity()[0],
+                'ceps':  metrics.getCEPSComplexity,
+                'keith': metrics.getKeithComplexity,
+
+            }
+            for func_name, func in compl_metrics.items():
                 rc = compl_staff.setdefault(func_name, [])
                 rc.append(func())
-        for metric, value in compl_staff.items():
-            complexities[p.stem]['rhythmic_complexity'].setdefault(metric, []).append(np.mean(value))
+        for metric, piece in compl_staff.items():
+            # NOTE: we sum together, rather than mean the contributions of the staffs such that a staff with no notes,
+            # counts less than two which are  
+            complexities[p.stem]['rhythmic_complexity'].setdefault(metric, []).append(np.sum(piece))
 
         # NOTE: performance
-        notes_in_current_measure = matched_array[np.isin(matched_array['id'],snote_array['id'][measures == meas_n])]
+        mapper = {a['score_id']:a['performance_id'] for a in alignment if a['label'] == 'match'}
+        notes_in_current_measure = matched_parray[np.isin(matched_parray['id'],[mapper[id] for id in snote_array['id'][measures == unique_measures[i]]])]
         measure_end_l = np.max(notes_in_current_measure['onset_sec'])
         if i < len(unique_measures)-1:
-            notes_in_next_measure = matched_array[np.isin(matched_array['id'],snote_array['id'][measures == unique_measures[i+1]])]
+            notes_in_next_measure = matched_parray[np.isin(matched_parray['id'],[mapper[id] for id in snote_array['id'][measures == unique_measures[i+1]]])]
             measure_end_r = np.min(notes_in_next_measure['onset_sec'])
         else:
             notes_in_current_measure
@@ -152,13 +145,13 @@ for i in range(1,take_n_measures):
         timeshift = [],
         both = [],
     )
-    for value in complexities.values():
-        for rhythmic_type in value['rhythmic_complexity']:
+    for piece in complexities.values():
+        for rhythmic_type in piece['rhythmic_complexity']:
             rhytmic_complexities.setdefault(rhythmic_type, [])
-            rhytmic_complexities[rhythmic_type].extend(value['rhythmic_complexity'][rhythmic_type][:i])
-        iic['pitch'].extend([iic[:, 0].mean().item() for iic in value['iic'][:i]])
-        iic['timeshift'].extend([iic[:, 3].mean().item() for iic in value['iic'][:i]])
-        iic['both'].extend([iic.sum(-1).mean().item() for iic in value['iic'][:i]])
+            rhytmic_complexities[rhythmic_type].extend(piece['rhythmic_complexity'][rhythmic_type][:i])
+        iic['pitch'].extend([iic[:, 0].mean().item() for iic in piece['iic'][:i]])
+        iic['timeshift'].extend([iic[:, 3].mean().item() for iic in piece['iic'][:i]])
+        iic['both'].extend([iic.sum(-1).mean().item() for iic in piece['iic'][:i]])
     for rhythmic_type in rhytmic_complexities:
         for iic_type in iic:
             corr, p = pearsonr(iic[iic_type], rhytmic_complexities[rhythmic_type])
@@ -173,11 +166,19 @@ for i in range(1,take_n_measures):
                 'First $n$ measures.': i
             })
 corrs = pd.DataFrame(corrs)
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(figsize=(10, 5))
 cs = []
 styles = []
 labels = []
 grouped = corrs.groupby(['complexity_type', 'iic_type'])
+comp_formats = {
+    'smith': ('orange', 'H'),
+    'lhl': ('red', 'D'),
+    'iecl': ('blue', 'o'),
+    'iecg': ('green', 's'),
+    'ceps': ('purple', '^'),
+    'keith': ('black', 'v'),
+}
 for (complexity_type, iic_type), group in grouped:
 # for (iic_type, complexity_type) in [('pitch',)]:
     # group = grouped.get_group((iic_type, complexity_type))
@@ -187,22 +188,17 @@ for (complexity_type, iic_type), group in grouped:
         style=':'
     elif iic_type == 'both':
         style='-'
+        continue
     else:
         raise NotImplementedError
-    if complexity_type == 'smith':
-        c = 'orange'
-        style += 'H'
-    elif complexity_type == 'lhl':
-        c = 'red'
-        style += 'D'
-    else:
-        raise NotImplementedError
+    c, style_ = comp_formats[complexity_type]
+    style += style_
     cs.append(c)
     styles.append(style)
     labels.append(f'${complexity_type}_{{{iic_type}}}$')
     group.plot(x='First $n$ measures.', y='$\rho$', ax=ax, style=style, c=c, legend=f'${complexity_type}_{{{iic_type}}}$')
-    # ax.fill_between(group['First $n$ measures.'], group['r_l'], group['r_h'], color=c, alpha=0.1)
+    ax.fill_between(group['First $n$ measures.'], group['r_l'], group['r_h'], color=c, alpha=0.1)
 # grouped.plot(x='n', y='corr', ax=ax, style=styles)
-ax.legend(labels)
+ax.legend(labels, loc='upper right')
 ax.set_title('Correlation between $IIC$ and rhythmic complexity.')
 fig.savefig('out/quant/figs/rhythmic_complexity.pdf')

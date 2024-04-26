@@ -1,5 +1,6 @@
+from argparse import Namespace
 from pathlib import Path
-from jsonargparse import ArgumentParser
+from jsonargparse import ActionYesNo, ArgumentParser
 from matplotlib import pyplot as plt
 import pandas as pd
 import pretty_midi
@@ -96,10 +97,12 @@ def compute():
                     compl_metrics = {
                         'lhl': metrics.getLonguetHigginsLeeComplexity,
                         'smith': metrics.getSmithHoningComplexity,
-                        'iecl': lambda : metrics.getInformationEntropyComplexity()[1],
-                        'iecg': lambda : metrics.getInformationEntropyComplexity()[0],
+                        'ioil': lambda : metrics.getInformationEntropyComplexity()[1],
+                        'ioiln': lambda : metrics.getInformationEntropyComplexity()[1]/np.log(metrics.length),
+                        'ioig': lambda : metrics.getInformationEntropyComplexity()[0],
                         'ceps':  metrics.getCEPSComplexity,
                         'keith': metrics.getKeithComplexity,
+                        'metrical': lambda : metrics.getToussaintComplexity()[2]
 
                     }
                     for func_name, func in compl_metrics.items():
@@ -162,67 +165,70 @@ def compute():
                     })
     corrs = pd.DataFrame(corrs)
     corrs.to_hdf('out/quant/rhythmic_corrs.h5',key='corr')
-def plot():
+def plot(args : Namespace):
     corrs = pd.read_hdf('out/quant/rhythmic_corrs.h5',key='corr')
-    comp_formats = {
-        'smith': ('orange', 'H'),
-        'lhl': ('red', 'D'),
-        'iecl': ('blue', 'o'),
-        'iecg': ('green', 's'),
-        'ceps': ('purple', '^'),
-        'keith': ('black', 'v'),
-    }
+    results = []
+    if args.best:
+        corrs = corrs[corrs.complexity_type== 'iecl']
+        # corrs.rename(columns={'iecl': 'ioi'})
+        # corrs[corrs.complexity_type == 'iecel']
+        corrs.complexity_type = 'ioil'
+    else:
+        corrs =  corrs[~(corrs.iic_type == 'both')]
+        corrs.complexity_type = corrs.complexity_type.replace({'he' : 'ioil', 'iecg' : 'ioig'})
+        # corrs.complexity_type[corrs.complexity_type == 'iecg'] = 'ioig'
     for staff_group_name, staff_group in corrs[~corrs.r.isna()].groupby('staff_coll'):
         grouped = staff_group.groupby(['complexity_type', 'iic_type'])
         fig, ax = plt.subplots(figsize=(10, 5))
-        cs = []
-        styles = []
-        labels = []
-
         for (complexity_type, iic_type), group in grouped:
-        # for (iic_type, complexity_type) in [('pitch',)]:
-            # group = grouped.get_group((iic_type, complexity_type))
-            if iic_type == 'pitch':
-                style='--'
-            elif iic_type == 'timeshift':
-                style=':'
-            elif iic_type == 'both':
-                style='-'
-                continue
-            else:
-                raise NotImplementedError
-            c, style_ = comp_formats[complexity_type]
-            style += style_
-            cs.append(c)
-            styles.append(style)
-            labels.append(f'${complexity_type}_{{{iic_type}}}$')
-            # group.plot(x='First $n$ measures.', y='$\rho$', ax=ax, style=style, c=c, legend=f'${complexity_type}_{{{iic_type}}}$', markevery=.1)
-            group.plot(x='n', y='r', ax=ax, style=style, c=c, legend=f'${complexity_type}_{{{iic_type}}}$', markevery=.1,
-            # ylabel='$\\rho$', xlabel='First $n$ measures.'
-            )
-            # ax.fill_between(group['First $n$ measures.'], group['r_l'], group['r_h'], color=c, alpha=0.1)
-            ax.fill_between(group['n'], group['r_l'], group['r_h'], color=c, alpha=0.1)
-        # grouped.plot(x='n', y='corr', ax=ax, style=styles)
+            plot_curve(ax, complexity_type, iic_type, group)
         ax.set_xlabel('First $n$ measures.')
         ax.set_ylabel('$\\rho$')
         ax.set_xlim((1,382))
         ax.set_xscale('log')
-        ax.legend(labels, loc='upper right')
+        # ax.legend(labels, loc='upper right')
         staff_name_mapper = {'[[1, 2]]': 'staff_onset_union', '[[1], [2]]': 'staff_meaned'}
         ax.set_title(f'Correlation between $IIC$ and rhythmic complexity using {staff_name_mapper[staff_group_name]}.')
-        fig.savefig(f'out/quant/figs/rhythmic_complexity_{staff_name_mapper[staff_group_name]}.pdf')
+        fig.savefig(f'out/quant/figs/rhythmic_complexity_{staff_name_mapper[staff_group_name]}{"_best" if args.best else ""}.pdf')
+        results.append((fig, ax))
+    return results
+
+def plot_curve(ax, complexity_type, iic_type, group, conf_int=True):
+    comp_formats = {
+                'smith': ('orange', 'H'),
+                'lhl': ('blue', 'D'),
+                'he': ('red', 'o'),
+                'ioig': ('green', 's'),
+                'ceps': ('purple', '^'),
+                'keith': ('black', 'v'),
+                'metrical': ('brown', 'x'),
+            }
+    if iic_type == 'pitch':
+        style='--'
+    elif iic_type == 'timeshift':
+        style=':'
+    elif iic_type == 'both':
+        style='-'
+    else:
+        raise NotImplementedError
+    c, style_ = comp_formats[complexity_type]
+    style += style_
+    group.plot(x='n', y='r', ax=ax, style=style, c=c, label=f'${complexity_type}_{{{iic_type}}}$', markevery=.1)
+    if conf_int:
+        ax.fill_between(group['n'], group['r_l'], group['r_h'], color=c, alpha=0.1)
 if __name__ == '__main__':
     parser = ArgumentParser()
     commands = parser.add_subcommands()
     compute_parser = ArgumentParser() 
     plot_parser = ArgumentParser()
+    plot_parser.add_argument('--best', action=ActionYesNo, default=False)
     commands.add_subcommand("compute", compute_parser)
     commands.add_subcommand("plot", plot_parser)
     args = parser.parse_args()
     if args.subcommand == 'compute':
         compute()
     elif args.subcommand == 'plot':
-        plot()
+        plot(args.plot)
     else:
         compute()
         plot()

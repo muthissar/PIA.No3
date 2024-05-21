@@ -136,6 +136,14 @@ def compute():
             timeshift = [],
             both = [],
         )
+        # iic = {
+        #     'pitch' : [],
+        #     'timeshift' : [],
+        #     'both' : [],
+        #     'pitch_l' : [],
+        #     'timeshift_l' : [],
+        #     'both_l' : [],
+        # }
         for piece in complexities.values():
             # for rhythmic_type in piece['rhythmic_complexity']:
             for staff_coll_name, staff_coll in piece['rhythmic_complexity'].items():
@@ -169,24 +177,24 @@ def plot(args : Namespace):
     corrs = pd.read_hdf('out/quant/rhythmic_corrs.h5',key='corr')
     results = []
     if args.best:
-        corrs = corrs[corrs.complexity_type== 'iecl']
+        corrs = corrs[corrs.complexity_type== 'ioiln']
         # corrs.rename(columns={'iecl': 'ioi'})
         # corrs[corrs.complexity_type == 'iecel']
-        corrs.complexity_type = 'ioil'
+        corrs.complexity_type = 'he'
     else:
         corrs =  corrs[~(corrs.iic_type == 'both')]
-        corrs.complexity_type = corrs.complexity_type.replace({'he' : 'ioil', 'iecg' : 'ioig'})
+        # corrs.complexity_type = corrs.complexity_type.replace({'he' : 'ioil', 'iecg' : 'ioig'})
         # corrs.complexity_type[corrs.complexity_type == 'iecg'] = 'ioig'
     for staff_group_name, staff_group in corrs[~corrs.r.isna()].groupby('staff_coll'):
         grouped = staff_group.groupby(['complexity_type', 'iic_type'])
         fig, ax = plt.subplots(figsize=(10, 5))
         for (complexity_type, iic_type), group in grouped:
-            plot_curve(ax, complexity_type, iic_type, group)
+            plot_curve(ax, complexity_type, iic_type, group, conf_int=args.conf_int)
         ax.set_xlabel('First $n$ measures.')
         ax.set_ylabel('$\\rho$')
         ax.set_xlim((1,382))
         ax.set_xscale('log')
-        # ax.legend(labels, loc='upper right')
+        ax.legend(loc='upper right')
         staff_name_mapper = {'[[1, 2]]': 'staff_onset_union', '[[1], [2]]': 'staff_meaned'}
         ax.set_title(f'Correlation between $IIC$ and rhythmic complexity using {staff_name_mapper[staff_group_name]}.')
         fig.savefig(f'out/quant/figs/rhythmic_complexity_{staff_name_mapper[staff_group_name]}{"_best" if args.best else ""}.pdf')
@@ -198,6 +206,8 @@ def plot_curve(ax, complexity_type, iic_type, group, conf_int=True):
                 'smith': ('orange', 'H'),
                 'lhl': ('blue', 'D'),
                 'he': ('red', 'o'),
+                'ioil': ('cyan', '>'),
+                'ioiln': ('red', 'o'),
                 'ioig': ('green', 's'),
                 'ceps': ('purple', '^'),
                 'keith': ('black', 'v'),
@@ -222,6 +232,7 @@ if __name__ == '__main__':
     compute_parser = ArgumentParser() 
     plot_parser = ArgumentParser()
     plot_parser.add_argument('--best', action=ActionYesNo, default=False)
+    plot_parser.add_argument('--conf_int', action=ActionYesNo, default=True)
     commands.add_subcommand("compute", compute_parser)
     commands.add_subcommand("plot", plot_parser)
     args = parser.parse_args()

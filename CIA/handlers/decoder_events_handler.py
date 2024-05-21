@@ -1,5 +1,5 @@
 import os
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 from warnings import warn
 from CIA.dataset_managers.piano_midi_dataset import END_SYMBOL, PAD_SYMBOL, START_SYMBOL
 from CIA.handlers.handler import Handler
@@ -582,8 +582,9 @@ class DecoderEventsHandler(Handler):
         sampling_config : SamplingConfig,
         experiment: Experiment,
         interpolator_template : ICCurve,
-        num_max_generated_events=None,
-        regenerate_first_ts=False,
+        num_max_generated_events : bool = None,
+        regenerate_first_ts : bool = False,
+        app : bool = False, 
     ):
         # Weighting function used in interpolation
         weight_fn = experiment.weight
@@ -882,19 +883,27 @@ class DecoderEventsHandler(Handler):
         warn("There's a mismatch now that we don't have these extra 0 tokens until decoding beginnig... ")
         # inpaint_end_gen = token_times[best_index_all][event_indices[best_index_all]].max().item()
         inpaint_end_gen = token_times[best_index_all][event_indices[best_index_all]-decoding_start_event].max().item()
-        gen = ICRes(
-            tok = x[best_index_all].cpu(),
-            ic_tok = ic_tok_gen,
-            entr_tok = entr_gen,
-            timepoints = tok_times,
-            ic_int = ic_int_gen,
-            timepoints_int = interpolation_time_points[0].clone(),
-            decoding_end=decoding_end,
-            piece = piece,
-            ic_dev = ic_curve_dev([ic_int_gen], [ic_int_temp])[0],
-            inpaint_end  = inpaint_end_gen,
-        )
-        return gen
+        if app:
+            # generated_region = x[:, decoding_start_event:decoding_end]
+            generated_region = ic_tok_gen[None]
+            num_event_generated = decoding_end - decoding_start_event
+            done = completed[best_index].item()
+            return x[best_index:best_index+1].cpu(), generated_region, decoding_end, num_event_generated, done
+        else:
+            gen = ICRes(
+                tok = x[best_index_all].cpu(),
+                ic_tok = ic_tok_gen,
+                entr_tok = entr_gen,
+                timepoints = tok_times,
+                ic_int = ic_int_gen,
+                timepoints_int = interpolation_time_points[0].clone(),
+                decoding_end=decoding_end,
+                piece = piece,
+                ic_dev = ic_curve_dev([ic_int_gen], [ic_int_temp])[0],
+                inpaint_end  = inpaint_end_gen,
+            )
+            return gen
+    
     @staticmethod
     def integration(a : float, b : float, unique_timepoint : torch.Tensor, cum_ics: torch.Tensor): 
             assert cum_ics.dim() == 2
@@ -913,6 +922,7 @@ class DecoderEventsHandler(Handler):
         x : torch.Tensor,
         metadata_dict : dict,
         onset_on_next_note: bool = False,
+        receptive_field_len : Optional[int] = None
         # match_original_onsets : Optional[Mapping[int, Any]] = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # TODO add arguments to preprocess
@@ -922,8 +932,14 @@ class DecoderEventsHandler(Handler):
         assert batch_size == 1
         with torch.no_grad():
             # self.forward(target=x, metadata_dict=metadata_dict)
+            # decrease the receptive field, by instead padding the sequence...
+            # x[:, :256-receptive_field_len] = [self.dataloader_generator.dataset.value2index[feature][PAD_SYMBOL] for feature in self.dataloader_generator.features]
+            if receptive_field_len is not None:
+                x[:, :self.data_processor.num_events_before-receptive_field_len] = torch.tensor([self.dataloader_generator.dataset.value2index[feature][PAD_SYMBOL] for feature in self.dataloader_generator.features], dtype=x.dtype)
             output, target_embedded, h_pe = self.model.module.compute_event_state(
-                x, metadata_dict, h_pe_init=None
+                x, metadata_dict, h_pe_init=None, 
+                # NOTE: adding the mask is hard in this context, becasue there are many self attention componets (in read), but also in residual attention.
+                # mask=torch.ones((1,1,1024), dtype=torch.bool, device=x.device)
             )
 
             # auto regressive predictions from output

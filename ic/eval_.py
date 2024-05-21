@@ -388,13 +388,46 @@ def get_performance(piece_name, batik_dir : str='/share/hel/home/mathias/dataset
     pnote_array = performance.note_array()
     return alignment,pnote_array
 
-def get_all_token_ics_batik() -> dict:
+def create_all_ic_config(
+        batik_dir : str = '/share/hel/home/mathias/datasets/batik_plays_mozart',
+        min_notes_in_context : int = 256,
+        n_inpaint : int = 506,
+        # NOTE: this have importance for setting the placeholder length. 
+        # most likely, it should not set true, since the model will think that whatever we in changed unless 
+        restrict_n_inpaint : bool = False
+    ):
+    import pretty_midi
+    
+    hop_size = n_inpaint-min_notes_in_context
+    # decoding_start = 514
+    files = sorted(Path(batik_dir, 'midi').glob('*.mid'))
+    pieces = []
+    for f in files:
+        n_notes = len(pretty_midi.PrettyMIDI(str(f)).instruments[0].notes)
+        for i in range(-min_notes_in_context, n_notes-n_inpaint, hop_size):
+            pieces.append(dict(
+                path=str(f),
+                start_node=i,
+                n_inpaint=n_inpaint if restrict_n_inpaint else 506,
+                end_window=0,
+            # ) for i in range(0-min_notes_in_context-1, n_notes, hop_size)],
+            ))
+    
+    out_file = Path(f'out/gen_confs/batik_all_pieces_{min_notes_in_context}_{n_inpaint}.json')
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_file, 'w') as f:
+        json.dump(pieces, f, indent=2)
+
+def get_all_token_ics_batik(
+        min_notes_in_context : int = 256,
+        n_inpaint : int = 506,
+) -> dict:
     # get ic of all pieces in the batik ds. Asusme that the same shift, and number of notes was used for all examples.
     out_dir = Path('out/a6aa5f7b2689124d92900e130182eebe0394953f773fcfec9b9e9e1466e792da/samplingconfig-k-traces-128-temperature-1-0-n-poly-notes-none-dynamic-temperature-max-ic-50-0-top-p-0-0-top-k-0')
     pat = re.compile(r'^(?P<piece>.+)_start_(?P<start>-?\d+)_nodes_(?P<n_inpaint>-?\d+)_end_0$')
     decoding_start = 514
-    min_notes_in_context = 256
-    n_inpaint = 506
+    # min_notes_in_context = 256
+    # n_inpaint = 506
     hop_size = n_inpaint-min_notes_in_context
 
     def parse_path(p : Path) -> int:

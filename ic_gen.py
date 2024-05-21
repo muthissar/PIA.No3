@@ -37,7 +37,7 @@ model_dir = 'models/piano_event_performer_2021-10-01_16:03:06'
 # logging.getLogger()
 
 
-def gen(c : Config, recompute : bool,  device='cpu'):
+def gen(c : Config, recompute : bool, device='cpu', app : bool=False):
     logger = multiprocessing.get_logger()
     # config =  importlib.import_module('CIA.configs.piarceiverStack').config
     # NOTE: override configuration
@@ -84,7 +84,8 @@ def gen(c : Config, recompute : bool,  device='cpu'):
         timepoints_tok_template, template_inpaint_end, ic_tok_template, entr_tok_template = decoder_handler.compute_token_ics(
             x=metadata_dict['original_sequence'],
             metadata_dict=metadata_dict,
-            onset_on_next_note = c.experiment.onset_on_next_note
+            onset_on_next_note = c.experiment.onset_on_next_note,
+            receptive_field_len = c.experiment.receptive_field_len,
         )
         # TODO: Should not necessarily be the case, but for now we assign events to the first timepoint
         if c.experiment.match_metric == 'ic':
@@ -141,6 +142,7 @@ def gen(c : Config, recompute : bool,  device='cpu'):
                     piece=piece,
                     num_max_generated_events=None,
                     interpolator_template=ic_match_curve,
+                    app=app
                 )
                 interpolation_time_points = gen.timepoints_int
                 ic_int_match = ic_match_curve(interpolation_time_points[None])[0]
@@ -388,6 +390,7 @@ if __name__ == "__main__":
     # gen_subcomm.add_argument("--no_plot", type=bool, default=False)
     gen_subcomm.add_argument("--plot", action=ActionYesNo, default=False)
     gen_subcomm.add_argument("--recompute", action=ActionYesNo, default=False)
+    gen_subcomm.add_argument("--app", action=ActionYesNo, default=False)
     subcommands.add_subcommand("gen", gen_subcomm)
     plot_subcomm = ArgumentParser()
     plot_subcomm.add_argument("--recompute", action=ActionYesNo, default=False)
@@ -454,7 +457,8 @@ if __name__ == "__main__":
                 parser.save(args_exp, dir.joinpath('config.json'), overwrite=True)
             print(f'Experiment: {c.experiment}\n Sampling Config: {c.sampling_config}, folder: {c.out}')
             recompute = args.gen.recompute
-            gen(c, recompute, device=device)
+            is_app = args.gen.app
+            gen(c, recompute, device=device, app=is_app)
             # NOTE: allow the processes to finish before plotting
             if torch.distributed.is_initialized():
                 torch.distributed.barrier()
@@ -511,9 +515,8 @@ if __name__ == "__main__":
         paths = [str(c.out) for c in app]
         sync(args.sync.src, args.sync.dst, paths)
     elif args.sync_webapp:
-        
         parser = ArgumentParser(
-        parser_mode="jsonnet",
+            parser_mode="jsonnet",
         )
         parser.add_argument("--app", type=List[Config])  
         parser.add_argument("--config", action=ActionConfigFile)

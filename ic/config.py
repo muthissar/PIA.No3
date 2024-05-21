@@ -39,6 +39,9 @@ class Experiment:
     metric_clip: Optional[List[float]] = None
     onset_on_next_note: bool = True
     reduce_equal_times: str = 'sum'
+    receptive_field_len: Optional[int] = None
+    
+
     # NOTE: here we should have either the test set, or some named collection of pieces....
     def __post_init__(self):
         assert self.match_metric in ['ic', 'typicality']

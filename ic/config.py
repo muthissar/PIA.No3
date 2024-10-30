@@ -32,7 +32,7 @@ class SamplingConfig:
 class Experiment:
     time_points_generator: TimepointsGenerator
     weight : Weight
-    dataset : Data
+    dataset : Optional[Data]
     ic_curve: Optional[ICCurve]
     match_metric: str = 'ic'
     # metric_clip: Optional[torch.FloatTensor] = None
@@ -50,13 +50,15 @@ class Experiment:
     def hash_name(self)-> str:
         return hashlib.sha256(str(self).encode('utf-8')).hexdigest()
 
+@dataclasses.dataclass
+class BaseConfig:
+    sampling_config: SamplingConfig
+    experiment: Experiment
 
 @dataclasses.dataclass
-class Config:
-    sampling_config: SamplingConfig
+class Config(BaseConfig):
     samples_per_template: int
     logging: str
-    experiment: Experiment
     seed: Optional[int] = None
     def __post_init__(self):
         # TODO: exp uniquely identifies where

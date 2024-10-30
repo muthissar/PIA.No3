@@ -888,7 +888,7 @@ class DecoderEventsHandler(Handler):
             generated_region = ic_tok_gen[None]
             num_event_generated = decoding_end - decoding_start_event
             done = completed[best_index].item()
-            return x[best_index:best_index+1].cpu(), generated_region, decoding_end, num_event_generated, done
+            return x[best_index:best_index+1].cpu(), generated_region, decoding_end, num_event_generated, done, ic_tok_gen, tok_times
         else:
             gen = ICRes(
                 tok = x[best_index_all].cpu(),
